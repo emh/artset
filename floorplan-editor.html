@@ -1,0 +1,1013 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Artset Editor — Floor Plan Authoring (Prototype)</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Hanken+Grotesk:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      /* ---- design tokens (matched to the Artset review app) ---- */
+      :root {
+        --paper: #f4f0e8;
+        --paper-2: #ece6da;
+        --card: #fbf9f4;
+        --ink: #211e1a;
+        --ink-soft: #5b554c;
+        --ink-faint: #8b8478;
+        --line: #ddd5c6;
+        --line-strong: #cabfa9;
+        --accent: #8a5a3c;
+        --accent-soft: #b98a63;
+        --good: #4a5f43;
+        --display: "Fraunces", Georgia, serif;
+        --body: "Hanken Grotesk", system-ui, sans-serif;
+        --mono: "IBM Plex Mono", ui-monospace, monospace;
+        --radius: 4px;
+        --shadow: 0 1px 2px rgba(33, 30, 26, 0.04),
+          0 10px 30px -18px rgba(33, 30, 26, 0.25);
+        --blue: #1f6fff;
+        --blue-deep: #0b4fd6;
+        --wall: #1f6fff;
+        --room: rgba(31, 111, 255, 0.13);
+        --room-strong: rgba(31, 111, 255, 0.26);
+      }
+
+      * { box-sizing: border-box; }
+
+      body {
+        margin: 0;
+        background: var(--paper);
+        color: var(--ink);
+        font-family: var(--body);
+        font-size: 15px;
+        line-height: 1.5;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      .site-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 24px;
+        padding: 16px clamp(18px, 4vw, 40px);
+        border-bottom: 1px solid var(--line);
+        background: rgba(244, 240, 232, 0.9);
+      }
+      .brand { display: flex; align-items: center; gap: 12px; }
+      .brand-mark { font-size: 20px; color: var(--accent); }
+      .brand-text { display: flex; flex-direction: column; line-height: 1.05; }
+      .brand-name { font-family: var(--display); font-weight: 600; font-size: 19px; }
+      .brand-sub {
+        font-size: 10px; text-transform: uppercase; letter-spacing: 0.22em;
+        color: var(--ink-faint);
+      }
+      .badge {
+        font-family: var(--mono); font-size: 11px; color: var(--ink-faint);
+        border: 1px solid var(--line-strong); border-radius: 999px; padding: 4px 12px;
+      }
+
+      .layout {
+        display: grid;
+        grid-template-columns: 1fr 372px;
+        gap: 0;
+        height: calc(100vh - 65px);
+      }
+
+      /* ---- stage ---- */
+      .stage {
+        position: relative;
+        padding: clamp(16px, 3vw, 32px);
+        overflow: auto;
+        display: flex;
+        align-items: flex-start;
+        justify-content: center;
+      }
+
+      .dropzone {
+        width: 100%;
+        max-width: 620px;
+        margin-top: 6vh;
+        border: 2px dashed var(--line-strong);
+        border-radius: 8px;
+        background: var(--card);
+        padding: 56px 40px;
+        text-align: center;
+        cursor: pointer;
+        transition: border-color 0.2s, background 0.2s;
+      }
+      .dropzone.is-drag { border-color: var(--accent); background: #f6efe6; }
+      .dropzone h2 {
+        font-family: var(--display); font-weight: 500; font-size: 24px; margin: 0 0 8px;
+      }
+      .dropzone p { color: var(--ink-soft); margin: 0 0 20px; }
+      .dz-icon { font-size: 34px; color: var(--accent-soft); margin-bottom: 14px; }
+      .btn {
+        font-family: var(--body); font-size: 14px; font-weight: 500;
+        padding: 9px 18px; border-radius: 999px; border: 1px solid var(--ink);
+        background: var(--ink); color: var(--paper); cursor: pointer;
+        transition: opacity 0.2s;
+      }
+      .btn:hover { opacity: 0.88; }
+      .btn--ghost { background: transparent; color: var(--ink); border-color: var(--line-strong); }
+      .btn--sm { font-size: 12.5px; padding: 6px 12px; }
+      .dz-hint { font-size: 12px; color: var(--ink-faint); margin-top: 16px; }
+
+      .plan-wrap { position: relative; width: 100%; max-width: 1100px; line-height: 0; }
+      .plan-wrap img { display: block; width: 100%; height: auto; user-select: none; }
+      #maskCanvas {
+        position: absolute; inset: 0; width: 100%; height: 100%;
+        image-rendering: pixelated; pointer-events: none; opacity: 0;
+        transition: opacity 0.15s;
+      }
+      #maskCanvas.show { opacity: 1; }
+      #overlay { position: absolute; inset: 0; width: 100%; height: 100%; }
+      .ov-room { fill: var(--room); stroke: var(--blue); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+      .ov-room.is-hover { fill: var(--room-strong); }
+      .ov-roomlabel {
+        fill: var(--ink); font-family: var(--display); font-weight: 500;
+        paint-order: stroke; stroke: var(--card); stroke-width: 3; stroke-linejoin: round;
+      }
+      .ov-candidate { fill: rgba(31,111,255,0.0); stroke: transparent; cursor: pointer; }
+      .ov-candidate.is-hover { fill: var(--room-strong); stroke: var(--blue); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+      .ov-wall { stroke: rgba(31,111,255,0.45); stroke-width: 3; vector-effect: non-scaling-stroke; stroke-linecap: round; }
+      .ov-wall.is-spec { stroke: var(--good); }
+      .ov-wall-hit { stroke: transparent; stroke-width: 18; vector-effect: non-scaling-stroke; cursor: pointer; }
+      .ov-wall.is-hover { stroke: var(--wall); stroke-width: 6; }
+      .ov-wall.is-active { stroke: var(--wall); stroke-width: 6; }
+      .ov-wall-dot { fill: var(--blue); }
+
+      /* ---- side panel ---- */
+      .panel {
+        border-left: 1px solid var(--line);
+        background: var(--card);
+        padding: 22px 22px 40px;
+        overflow: auto;
+      }
+      .panel h1 {
+        font-family: var(--display); font-weight: 500; font-size: 22px; margin: 0 0 2px;
+      }
+      .panel .eyebrow {
+        font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.22em;
+        color: var(--accent); margin-bottom: 6px;
+      }
+      .section { border-top: 1px solid var(--line); padding: 18px 0; }
+      .section:first-of-type { border-top: 0; }
+      .section h3 {
+        font-size: 11px; text-transform: uppercase; letter-spacing: 0.14em;
+        color: var(--ink-faint); margin: 0 0 12px;
+      }
+      .ctrl { margin-bottom: 14px; }
+      .ctrl label { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 5px; }
+      .ctrl label .val { font-family: var(--mono); color: var(--ink-soft); }
+      input[type="range"] { width: 100%; accent-color: var(--accent); }
+      .toggle { display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; }
+      .field { margin-bottom: 12px; }
+      .field label { display: block; font-size: 12px; color: var(--ink-faint); margin-bottom: 4px; }
+      .field input, .field select {
+        width: 100%; font-family: var(--body); font-size: 14px;
+        padding: 7px 10px; border: 1px solid var(--line-strong);
+        border-radius: var(--radius); background: var(--paper); color: var(--ink);
+      }
+      .field.inline { display: flex; gap: 8px; align-items: flex-end; }
+      .field.inline > div { flex: 1; }
+
+      .hint { font-size: 12.5px; color: var(--ink-faint); }
+      .empty { color: var(--ink-faint); font-style: italic; font-size: 13px; }
+
+      .room-item, .wall-item {
+        display: flex; align-items: center; justify-content: space-between; gap: 10px;
+        padding: 11px 12px; border: 1px solid var(--line);
+        border-radius: var(--radius); background: var(--paper); margin-bottom: 8px;
+        cursor: pointer; transition: border-color 0.15s, background 0.15s;
+      }
+      .room-item:hover, .wall-item:hover { border-color: var(--accent-soft); }
+      .wall-item.is-active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+      .room-item .nm, .wall-item .nm { font-weight: 500; font-size: 14px; }
+      .room-item .meta, .wall-item .meta { font-size: 11.5px; color: var(--ink-faint); font-family: var(--mono); }
+      .chip {
+        font-size: 10.5px; padding: 2px 8px; border-radius: 999px;
+        background: var(--paper-2); color: var(--ink-faint);
+      }
+      .chip.is-spec { background: #e7ece4; color: var(--good); }
+
+      .breadcrumb { font-size: 12.5px; color: var(--ink-faint); margin-bottom: 12px; }
+      .breadcrumb a { color: var(--accent); cursor: pointer; }
+
+      .seg-row {
+        display: grid; grid-template-columns: 1fr 1fr auto; gap: 6px; align-items: center;
+        margin-bottom: 6px;
+      }
+      .seg-row input, .seg-row select { padding: 5px 7px; font-size: 12.5px; }
+      .seg-usable { display: flex; align-items: center; gap: 5px; font-size: 12px; }
+      .seg-del { border: 0; background: none; color: var(--ink-faint); cursor: pointer; font-size: 15px; padding: 0 4px; }
+      .seg-del:hover { color: var(--wall); }
+      .linkbtn { background: none; border: 0; color: var(--accent); cursor: pointer; font-size: 13px; padding: 4px 0; font-family: var(--body); }
+      .linkbtn:hover { text-decoration: underline; }
+      .row-actions { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+
+      dialog { border: 1px solid var(--line-strong); border-radius: 8px; padding: 0; max-width: 560px; width: 90%; }
+      dialog::backdrop { background: rgba(33,30,26,0.4); }
+      .modal-head { padding: 16px 20px; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; align-items: center; }
+      .modal-head h3 { margin: 0; font-family: var(--display); font-weight: 500; font-size: 18px; text-transform: none; letter-spacing: 0; color: var(--ink); }
+      .modal-body { padding: 16px 20px; }
+      .modal-body textarea {
+        width: 100%; height: 320px; font-family: var(--mono); font-size: 12px;
+        border: 1px solid var(--line); border-radius: var(--radius); padding: 12px; resize: vertical;
+        background: var(--paper);
+      }
+    </style>
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="brand">
+        <span class="brand-mark">◆</span>
+        <span class="brand-text">
+          <span class="brand-name">Artset Editor</span>
+          <span class="brand-sub">Floor Plan Authoring</span>
+        </span>
+      </div>
+      <span class="badge">Prototype · client-side detection</span>
+    </header>
+
+    <div class="layout">
+      <div class="stage">
+        <div class="dropzone" id="dropzone">
+          <div class="dz-icon">⤓</div>
+          <h2>Upload a floor plan</h2>
+          <p>Drop an image of a floor plan, or browse. We'll detect the walls so you can
+            click rooms and spec them.</p>
+          <button class="btn" id="browseBtn">Browse files</button>
+          <input type="file" id="fileInput" accept="image/*" hidden />
+          <div class="dz-hint">PNG or JPG · works best on clean, line-drawn plans</div>
+        </div>
+
+        <div class="plan-wrap" id="planWrap" hidden>
+          <img id="planImg" alt="Uploaded floor plan" />
+          <canvas id="maskCanvas"></canvas>
+          <svg id="overlay" xmlns="http://www.w3.org/2000/svg"></svg>
+        </div>
+      </div>
+
+      <aside class="panel" id="panel">
+        <div class="eyebrow">Authoring</div>
+        <h1 id="panelTitle">Get started</h1>
+        <div id="panelBody">
+          <p class="hint" style="margin-top:14px">
+            Upload a floor plan to begin. Then dial in detection, click a room to name it,
+            and click its walls to spec dimensions and usable space.
+          </p>
+        </div>
+      </aside>
+    </div>
+
+    <dialog id="exportDlg">
+      <div class="modal-head">
+        <h3>Exported spec (JSON)</h3>
+        <button class="btn btn--ghost btn--sm" id="closeExport">Close</button>
+      </div>
+      <div class="modal-body">
+        <p class="hint" style="margin-top:0">This is the same shape the review app consumes — rooms → walls → segments.</p>
+        <textarea id="exportText" readonly></textarea>
+      </div>
+    </dialog>
+
+    <script>
+      // =====================================================================
+      // Artset Editor — standalone floor-plan authoring prototype.
+      // Real client-side wall detection: threshold -> morphological close ->
+      // connected-component rooms -> boundary -> simplified wall segments.
+      // =====================================================================
+      const $ = (id) => document.getElementById(id);
+      const dropzone = $("dropzone");
+      const fileInput = $("fileInput");
+      const planWrap = $("planWrap");
+      const planImg = $("planImg");
+      const maskCanvas = $("maskCanvas");
+      const overlay = $("overlay");
+      const panelTitle = $("panelTitle");
+      const panelBody = $("panelBody");
+
+      const MAXDIM = 1100;
+
+      const state = {
+        iw: 0, ih: 0,
+        gray: null,            // Uint8 luminance of working raster
+        threshold: 150,
+        bridge: 4,             // close radius for room enclosure (doorways)
+        darkMask: null,        // Uint8 dark pixels (1 = dark)
+        darkLabels: null,      // Int32 connected components of dark pixels
+        selWalls: null,        // Uint8 user-selected wall pixels
+        wallMask: null,        // Uint8 close(selWalls, bridge) used for rooms
+        labels: null,          // Int32 component labels of non-wall (rooms)
+        candidates: [],        // {label, polygon, area, centroid}
+        pxPerFoot: null,
+        rooms: [],             // committed: {id, label, name, polygon, walls:[...]}
+        mode: "mark",          // 'mark' | 'rooms' | 'wall'
+        activeRoomId: null,
+        activeWallId: null,
+        hoverDarkLabel: -1,    // wall component under cursor (mark mode)
+        hoverLabel: -1,        // room candidate under cursor (rooms mode)
+        hoverWallId: null,
+        nextRoom: 1,
+      };
+
+      // ---------------------------------------------------------------- load
+      function handleFile(file) {
+        if (!file || !file.type.startsWith("image/")) return;
+        const url = URL.createObjectURL(file);
+        const img = new Image();
+        img.onload = () => {
+          const scale = Math.min(1, MAXDIM / Math.max(img.width, img.height));
+          const iw = Math.round(img.width * scale);
+          const ih = Math.round(img.height * scale);
+          const c = document.createElement("canvas");
+          c.width = iw; c.height = ih;
+          const cx = c.getContext("2d");
+          cx.drawImage(img, 0, 0, iw, ih);
+          const data = cx.getImageData(0, 0, iw, ih).data;
+          const gray = new Uint8ClampedArray(iw * ih);
+          for (let i = 0, p = 0; i < gray.length; i++, p += 4) {
+            gray[i] = (data[p] * 0.299 + data[p + 1] * 0.587 + data[p + 2] * 0.114) | 0;
+          }
+          state.iw = iw; state.ih = ih; state.gray = gray;
+          state.rooms = []; state.activeRoomId = null; state.activeWallId = null;
+          state.mode = "mark"; state.nextRoom = 1; state.candidates = [];
+          state.selWalls = new Uint8Array(iw * ih);
+          state.hoverDarkLabel = -1; state.hoverLabel = -1;
+          planImg.src = url;
+          planImg.onload = () => {
+            overlay.setAttribute("viewBox", `0 0 ${iw} ${ih}`);
+            maskCanvas.width = iw; maskCanvas.height = ih;
+            dropzone.hidden = true; planWrap.hidden = false;
+            recomputeDark();
+            drawWalls();
+            renderOverlay();
+            renderPanel();
+          };
+        };
+        img.src = url;
+      }
+
+      dropzone.addEventListener("click", (e) => {
+        if (e.target.id !== "browseBtn") fileInput.click();
+      });
+      $("browseBtn").addEventListener("click", (e) => { e.stopPropagation(); fileInput.click(); });
+      fileInput.addEventListener("change", (e) => handleFile(e.target.files[0]));
+      ["dragenter", "dragover"].forEach((ev) =>
+        dropzone.addEventListener(ev, (e) => { e.preventDefault(); dropzone.classList.add("is-drag"); }));
+      ["dragleave", "drop"].forEach((ev) =>
+        dropzone.addEventListener(ev, (e) => { e.preventDefault(); dropzone.classList.remove("is-drag"); }));
+      dropzone.addEventListener("drop", (e) => handleFile(e.dataTransfer.files[0]));
+
+      // -------------------------------------------- wall selection (manual)
+      // Dark pixels and their connected components. Clicking a wall selects the
+      // whole connected dark structure under it; furniture sits in separate
+      // components and is left unselected (ignored).
+      function recomputeDark() {
+        const { iw, ih, gray, threshold } = state;
+        const dark = new Uint8Array(iw * ih);
+        for (let i = 0; i < dark.length; i++) dark[i] = gray[i] < threshold ? 1 : 0;
+        state.darkMask = dark;
+        state.darkLabels = labelComponents(dark, iw, ih);
+        // keep any existing selection consistent with the current dark pixels
+        if (state.selWalls) for (let i = 0; i < dark.length; i++) if (!dark[i]) state.selWalls[i] = 0;
+      }
+
+      // 8-connected component labels of a binary mask.
+      function labelComponents(mask, iw, ih) {
+        const labels = new Int32Array(iw * ih).fill(-1);
+        const stack = new Int32Array(iw * ih);
+        let next = 0;
+        for (let s = 0; s < labels.length; s++) {
+          if (!mask[s] || labels[s] !== -1) continue;
+          let sp = 0; stack[sp++] = s; labels[s] = next;
+          while (sp > 0) {
+            const p = stack[--sp]; const x = p % iw, y = (p / iw) | 0;
+            for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+              if (!dx && !dy) continue;
+              const nx = x + dx, ny = y + dy;
+              if (nx < 0 || ny < 0 || nx >= iw || ny >= ih) continue;
+              const q = ny * iw + nx;
+              if (mask[q] && labels[q] === -1) { labels[q] = next; stack[sp++] = q; }
+            }
+          }
+          next++;
+        }
+        return labels;
+      }
+
+      // Toggle the connected wall structure under (x, y) in/out of the selection.
+      function toggleWallAt(x, y) {
+        const xi = Math.round(x), yi = Math.round(y);
+        if (xi < 0 || yi < 0 || xi >= state.iw || yi >= state.ih) return;
+        const idx = yi * state.iw + xi;
+        if (!state.darkMask[idx]) return;
+        const lbl = state.darkLabels[idx];
+        if (lbl < 0) return;
+        const turnOn = !state.selWalls[idx];
+        const { darkLabels, selWalls } = state;
+        for (let i = 0; i < darkLabels.length; i++) if (darkLabels[i] === lbl) selWalls[i] = turnOn ? 1 : 0;
+        buildRooms();
+      }
+
+      const selCount = () => state.selWalls ? state.selWalls.reduce((a, b) => a + b, 0) : 0;
+
+      // Rebuild room candidates from the selected walls (closed to bridge doorways).
+      function buildRooms() {
+        state.wallMask = closeMask(state.selWalls, state.iw, state.ih, state.bridge);
+        labelRooms();
+        drawWalls(state.mode === "mark" ? state.hoverDarkLabel : -1);
+        renderOverlay();
+        const rh = $("roomsHint"); if (rh && state.mode === "rooms") rh.innerHTML = roomsHintHTML();
+        const mh = $("markHint"); if (mh && state.mode === "mark") mh.innerHTML = markHintHTML();
+        const fr = $("findRoomsBtn");
+        if (fr && state.mode === "mark") { const on = selCount() > 0; fr.disabled = !on; fr.style.opacity = on ? "" : ".5"; }
+      }
+
+      function dilate(mask, w, h, r) {
+        if (r <= 0) return mask.slice();
+        const tmp = new Uint8Array(w * h);
+        for (let y = 0; y < h; y++) {
+          const row = y * w;
+          for (let x = 0; x < w; x++) {
+            let m = 0;
+            for (let k = -r; k <= r; k++) { const xx = x + k; if (xx >= 0 && xx < w && mask[row + xx]) { m = 1; break; } }
+            tmp[row + x] = m;
+          }
+        }
+        const out = new Uint8Array(w * h);
+        for (let x = 0; x < w; x++) {
+          for (let y = 0; y < h; y++) {
+            let m = 0;
+            for (let k = -r; k <= r; k++) { const yy = y + k; if (yy >= 0 && yy < h && tmp[yy * w + x]) { m = 1; break; } }
+            out[y * w + x] = m;
+          }
+        }
+        return out;
+      }
+      function erode(mask, w, h, r) {
+        if (r <= 0) return mask.slice();
+        const tmp = new Uint8Array(w * h);
+        for (let y = 0; y < h; y++) {
+          const row = y * w;
+          for (let x = 0; x < w; x++) {
+            let m = 1;
+            for (let k = -r; k <= r; k++) { const xx = x + k; if (xx < 0 || xx >= w || !mask[row + xx]) { m = 0; break; } }
+            tmp[row + x] = m;
+          }
+        }
+        const out = new Uint8Array(w * h);
+        for (let x = 0; x < w; x++) {
+          for (let y = 0; y < h; y++) {
+            let m = 1;
+            for (let k = -r; k <= r; k++) { const yy = y + k; if (yy < 0 || yy >= h || !tmp[yy * w + x]) { m = 0; break; } }
+            out[y * w + x] = m;
+          }
+        }
+        return out;
+      }
+      // close = dilate then erode (bridges gaps without thickening net walls)
+      function closeMask(mask, w, h, r) { return erode(dilate(mask, w, h, r), w, h, r); }
+
+      // Connected components of NON-wall pixels -> room candidates.
+      function labelRooms() {
+        const { iw, ih, wallMask } = state;
+        const labels = new Int32Array(iw * ih).fill(-1);
+        const stack = new Int32Array(iw * ih);
+        let next = 0;
+        const minArea = iw * ih * 0.004;
+        const cands = [];
+        for (let s = 0; s < labels.length; s++) {
+          if (wallMask[s] || labels[s] !== -1) continue;
+          // BFS flood for this component
+          let sp = 0; stack[sp++] = s; labels[s] = next;
+          let area = 0, sx = 0, sy = 0, touchesBorder = false;
+          while (sp > 0) {
+            const p = stack[--sp];
+            const x = p % iw, y = (p / iw) | 0;
+            area++; sx += x; sy += y;
+            if (x === 0 || y === 0 || x === iw - 1 || y === ih - 1) touchesBorder = true;
+            if (x > 0) { const q = p - 1; if (!wallMask[q] && labels[q] === -1) { labels[q] = next; stack[sp++] = q; } }
+            if (x < iw - 1) { const q = p + 1; if (!wallMask[q] && labels[q] === -1) { labels[q] = next; stack[sp++] = q; } }
+            if (y > 0) { const q = p - iw; if (!wallMask[q] && labels[q] === -1) { labels[q] = next; stack[sp++] = q; } }
+            if (y < ih - 1) { const q = p + iw; if (!wallMask[q] && labels[q] === -1) { labels[q] = next; stack[sp++] = q; } }
+          }
+          if (area >= minArea && !touchesBorder) {
+            cands.push({ label: next, area, centroid: [sx / area, sy / area] });
+          }
+          next++;
+        }
+        // Build simplified polygons for candidates.
+        for (const c of cands) c.polygon = orthoPolygon(regionPolygon(labels, iw, ih, c.label));
+        state.labels = labels;
+        state.candidates = cands.filter((c) => c.polygon && c.polygon.length >= 4);
+      }
+
+      // Boundary of a labelled region as a closed loop of grid-corner points.
+      function regionPolygon(labels, iw, ih, target) {
+        const key = (x, y) => y * (iw + 1) + x;
+        const adj = new Map();
+        const link = (a, b) => { (adj.get(a) || adj.set(a, []).get(a)).push(b); };
+        const edge = (x0, y0, x1, y1) => { link(key(x0, y0), key(x1, y1)); link(key(x1, y1), key(x0, y0)); };
+        for (let y = 0; y < ih; y++) {
+          for (let x = 0; x < iw; x++) {
+            if (labels[y * iw + x] !== target) continue;
+            if (y === 0 || labels[(y - 1) * iw + x] !== target) edge(x, y, x + 1, y);
+            if (y === ih - 1 || labels[(y + 1) * iw + x] !== target) edge(x, y + 1, x + 1, y + 1);
+            if (x === 0 || labels[y * iw + (x - 1)] !== target) edge(x, y, x, y + 1);
+            if (x === iw - 1 || labels[y * iw + (x + 1)] !== target) edge(x + 1, y, x + 1, y + 1);
+          }
+        }
+        if (adj.size === 0) return null;
+        // Walk the longest loop.
+        const used = new Set();
+        let best = null;
+        for (const start of adj.keys()) {
+          if (used.has(start)) continue;
+          const loop = [start];
+          let cur = start, prev = -1;
+          while (true) {
+            const ns = adj.get(cur) || [];
+            let nxt = -1;
+            for (const n of ns) { if (n !== prev && !used.has(edgeKey(cur, n))) { nxt = n; break; } }
+            if (nxt === -1) for (const n of ns) { if (!used.has(edgeKey(cur, n))) { nxt = n; break; } }
+            if (nxt === -1) break;
+            used.add(edgeKey(cur, nxt));
+            prev = cur; cur = nxt;
+            if (cur === start) break;
+            loop.push(cur);
+          }
+          if (!best || loop.length > best.length) best = loop;
+        }
+        if (!best) return null;
+        return best.map((k) => [k % (iw + 1), (k / (iw + 1)) | 0]);
+      }
+      function edgeKey(a, b) { return a < b ? a + "_" + b : b + "_" + a; }
+
+      // Simplify a rectilinear corner loop: drop collinear runs, then DP, keep axis-aligned.
+      function orthoPolygon(pts) {
+        if (!pts || pts.length < 4) return pts;
+        // remove consecutive collinear points
+        const dedup = [];
+        for (let i = 0; i < pts.length; i++) {
+          const a = pts[(i - 1 + pts.length) % pts.length], b = pts[i], c = pts[(i + 1) % pts.length];
+          const cross = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+          if (cross !== 0) dedup.push(b);
+        }
+        return douglasPeucker(dedup.length >= 4 ? dedup : pts, 3.0);
+      }
+
+      function douglasPeucker(pts, eps) {
+        if (pts.length < 4) return pts;
+        // operate on closed polygon: split at the two farthest-apart points
+        let i0 = 0, i1 = 0, maxD = -1;
+        for (let i = 1; i < pts.length; i++) {
+          const d = dist2(pts[0], pts[i]); if (d > maxD) { maxD = d; i1 = i; }
+        }
+        const a = dpOpen(pts.slice(0, i1 + 1), eps);
+        const b = dpOpen(pts.slice(i1).concat([pts[0]]), eps);
+        return a.slice(0, -1).concat(b.slice(0, -1));
+      }
+      function dpOpen(pts, eps) {
+        if (pts.length < 3) return pts;
+        let idx = -1, max = 0;
+        const a = pts[0], b = pts[pts.length - 1];
+        for (let i = 1; i < pts.length - 1; i++) {
+          const d = perpDist(pts[i], a, b);
+          if (d > max) { max = d; idx = i; }
+        }
+        if (max > eps) {
+          const left = dpOpen(pts.slice(0, idx + 1), eps);
+          const right = dpOpen(pts.slice(idx), eps);
+          return left.slice(0, -1).concat(right);
+        }
+        return [a, b];
+      }
+      const dist2 = (a, b) => (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2;
+      function perpDist(p, a, b) {
+        const dx = b[0] - a[0], dy = b[1] - a[1];
+        const len = Math.hypot(dx, dy) || 1;
+        return Math.abs((p[0] - a[0]) * dy - (p[1] - a[1]) * dx) / len;
+      }
+
+      // Polygon edges -> named walls.
+      function polygonToWalls(poly) {
+        const cx = poly.reduce((s, p) => s + p[0], 0) / poly.length;
+        const cy = poly.reduce((s, p) => s + p[1], 0) / poly.length;
+        const counts = {};
+        const walls = [];
+        for (let i = 0; i < poly.length; i++) {
+          const a = poly[i], b = poly[(i + 1) % poly.length];
+          const lenPx = Math.hypot(b[0] - a[0], b[1] - a[1]);
+          if (lenPx < 6) continue;
+          const mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2;
+          const horizontal = Math.abs(b[0] - a[0]) >= Math.abs(b[1] - a[1]);
+          let dir;
+          if (horizontal) dir = my < cy ? "North" : "South";
+          else dir = mx < cx ? "West" : "East";
+          counts[dir] = (counts[dir] || 0) + 1;
+          const name = counts[dir] > 1 ? `${dir} Wall ${counts[dir]}` : `${dir} Wall`;
+          walls.push({
+            id: "w" + Math.random().toString(36).slice(2, 8),
+            name, ax: a[0], ay: a[1], bx: b[0], by: b[1], lenPx,
+            lengthInches: null, heightInches: 108, segments: [],
+          });
+        }
+        return walls;
+      }
+
+      // ------------------------------------------------------------- drawing
+      // Paint selected walls (blue). In mark mode, also show unselected dark
+      // pixels faintly (clickable) and the hovered component in mid-blue.
+      function drawWalls(hoverLabel = -1) {
+        if (!state.darkMask) return;
+        const { iw, ih, darkMask, darkLabels, selWalls, mode } = state;
+        const cx = maskCanvas.getContext("2d");
+        const img = cx.createImageData(iw, ih);
+        const d = img.data;
+        const selA = mode === "mark" ? 235 : 140;
+        for (let i = 0, p = 0; i < iw * ih; i++, p += 4) {
+          if (selWalls[i]) { d[p] = 31; d[p + 1] = 111; d[p + 2] = 255; d[p + 3] = selA; }
+          else if (mode === "mark" && darkMask[i]) {
+            if (hoverLabel >= 0 && darkLabels[i] === hoverLabel) { d[p] = 31; d[p + 1] = 111; d[p + 2] = 255; d[p + 3] = 110; }
+            else { d[p] = 90; d[p + 1] = 90; d[p + 2] = 90; d[p + 3] = 60; }
+          }
+        }
+        cx.putImageData(img, 0, 0);
+        maskCanvas.classList.add("show");
+      }
+
+      function renderOverlay() {
+        let svg = "";
+        if (state.mode === "mark") {
+          overlay.innerHTML = "";
+          return;
+        }
+        if (state.mode === "rooms") {
+          // committed rooms
+          for (const r of state.rooms) {
+            svg += `<polygon class="ov-room" points="${ptsStr(r.polygon)}" data-room="${r.id}" />`;
+            const c = centroid(r.polygon);
+            svg += `<text class="ov-roomlabel" x="${c[0].toFixed(1)}" y="${c[1].toFixed(1)}" font-size="${labelSize()}" text-anchor="middle" dominant-baseline="middle">${escapeXml(r.name)}</text>`;
+          }
+          // hover candidate (only those not yet committed)
+          for (const c of state.candidates) {
+            const committed = state.rooms.some((r) => r.label === c.label);
+            if (committed) continue;
+            const hov = c.label === state.hoverLabel ? " is-hover" : "";
+            svg += `<polygon class="ov-candidate${hov}" points="${ptsStr(c.polygon)}" data-label="${c.label}" />`;
+          }
+        } else if (state.mode === "wall") {
+          const room = activeRoom();
+          if (room) {
+            svg += `<polygon class="ov-room" points="${ptsStr(room.polygon)}" />`;
+            for (const w of room.walls) {
+              const specced = w.lengthInches != null ? " is-spec" : "";
+              const cls = (w.id === state.activeWallId ? " is-active" : (w.id === state.hoverWallId ? " is-hover" : ""));
+              svg += `<line class="ov-wall${specced}${cls}" x1="${w.ax}" y1="${w.ay}" x2="${w.bx}" y2="${w.by}" />`;
+            }
+            // hit targets on top
+            for (const w of room.walls) {
+              svg += `<line class="ov-wall-hit" x1="${w.ax}" y1="${w.ay}" x2="${w.bx}" y2="${w.by}" data-wall="${w.id}" />`;
+            }
+          }
+        }
+        overlay.innerHTML = svg;
+      }
+
+      function labelSize() { return Math.max(11, Math.round(Math.max(state.iw, state.ih) * 0.022)); }
+      const ptsStr = (poly) => poly.map((p) => `${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(" ");
+      function centroid(poly) {
+        return [poly.reduce((s, p) => s + p[0], 0) / poly.length, poly.reduce((s, p) => s + p[1], 0) / poly.length];
+      }
+      const escapeXml = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+      // ------------------------------------------------------- mouse on plan
+      function evToWorking(e) {
+        const r = overlay.getBoundingClientRect();
+        return [((e.clientX - r.left) / r.width) * state.iw, ((e.clientY - r.top) / r.height) * state.ih];
+      }
+      overlay.addEventListener("mousemove", (e) => {
+        const [x, y] = evToWorking(e);
+        if (state.mode === "mark") {
+          const xi = Math.round(x), yi = Math.round(y);
+          let lbl = -1;
+          if (xi >= 0 && yi >= 0 && xi < state.iw && yi < state.ih && state.darkMask[yi * state.iw + xi]) {
+            lbl = state.darkLabels[yi * state.iw + xi];
+          }
+          if (lbl !== state.hoverDarkLabel) { state.hoverDarkLabel = lbl; drawWalls(lbl); }
+          overlay.style.cursor = lbl >= 0 ? "pointer" : "default";
+          return;
+        }
+        if (state.mode === "rooms") {
+          const xi = Math.round(x), yi = Math.round(y);
+          let lbl = -1;
+          if (xi >= 0 && yi >= 0 && xi < state.iw && yi < state.ih && !state.wallMask[yi * state.iw + xi]) {
+            const cand = state.candidates.find((c) => c.label === state.labels[yi * state.iw + xi]);
+            if (cand && !state.rooms.some((r) => r.label === cand.label)) lbl = cand.label;
+          }
+          if (lbl !== state.hoverLabel) { state.hoverLabel = lbl; renderOverlay(); }
+          overlay.style.cursor = lbl !== -1 ? "pointer" : "default";
+        } else if (state.mode === "wall") {
+          const room = activeRoom();
+          if (!room) return;
+          const w = nearestWall(room.walls, x, y, 14);
+          const id = w ? w.id : null;
+          if (id !== state.hoverWallId) { state.hoverWallId = id; renderOverlay(); }
+          overlay.style.cursor = id ? "pointer" : "default";
+        }
+      });
+      overlay.addEventListener("mouseleave", () => {
+        if (state.mode === "mark") { if (state.hoverDarkLabel !== -1) { state.hoverDarkLabel = -1; drawWalls(-1); } return; }
+        if (state.hoverLabel !== -1 || state.hoverWallId) { state.hoverLabel = -1; state.hoverWallId = null; renderOverlay(); }
+      });
+      overlay.addEventListener("click", (e) => {
+        const [x, y] = evToWorking(e);
+        if (state.mode === "mark") { toggleWallAt(x, y); return; }
+        if (state.mode === "rooms") {
+          if (state.hoverLabel === -1) return;
+          commitRoom(state.hoverLabel);
+        } else if (state.mode === "wall") {
+          const room = activeRoom();
+          const w = nearestWall(room.walls, x, y, 14);
+          if (w) { state.activeWallId = w.id; renderOverlay(); renderPanel(); }
+        }
+      });
+
+      function nearestWall(walls, x, y, tol) {
+        let best = null, bd = tol;
+        for (const w of walls) {
+          const d = segDist(x, y, w.ax, w.ay, w.bx, w.by);
+          if (d < bd) { bd = d; best = w; }
+        }
+        return best;
+      }
+      function segDist(px, py, ax, ay, bx, by) {
+        const dx = bx - ax, dy = by - ay;
+        const l2 = dx * dx + dy * dy || 1;
+        let t = ((px - ax) * dx + (py - ay) * dy) / l2;
+        t = Math.max(0, Math.min(1, t));
+        return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+      }
+
+      // --------------------------------------------------------- model edits
+      function commitRoom(label) {
+        const cand = state.candidates.find((c) => c.label === label);
+        if (!cand) return;
+        const room = {
+          id: "r" + Math.random().toString(36).slice(2, 8),
+          label, name: "Room " + state.nextRoom++,
+          polygon: cand.polygon, walls: polygonToWalls(cand.polygon),
+        };
+        applyScale(room);
+        state.rooms.push(room);
+        state.activeRoomId = room.id;
+        renderOverlay(); renderPanel();
+        setTimeout(() => { const el = $("roomNameInput"); if (el) { el.focus(); el.select(); } }, 0);
+      }
+      function applyScale(room) {
+        if (!state.pxPerFoot) return;
+        for (const w of room.walls) if (w.lengthInches == null) w.lengthInches = Math.round((w.lenPx / state.pxPerFoot) * 12);
+      }
+      const activeRoom = () => state.rooms.find((r) => r.id === state.activeRoomId);
+      const activeWall = () => { const r = activeRoom(); return r && r.walls.find((w) => w.id === state.activeWallId); };
+
+      function markHintHTML() {
+        const sel = selCount();
+        let s = `Click the walls on the plan. Each click selects the connected wall structure under it — often the whole layout at once — and ignores furniture. Click a wall again to deselect.`;
+        if (sel > 0) {
+          const n = state.candidates.length;
+          s += `<br/><strong>Walls marked.</strong> ${n} room${n === 1 ? "" : "s"} enclosed so far.`;
+          if (n === 0) s += ` Raise <em>Bridge gaps</em> if doorways leave rooms open.`;
+        }
+        return s;
+      }
+      function roomsHintHTML() {
+        const n = state.candidates.length;
+        let s = `Hover the plan — enclosed rooms highlight. Click one to add and name it. `;
+        s += `<strong>${n} room${n === 1 ? "" : "s"} found.</strong>`;
+        if (n <= 1) s += `<br/>Rooms merged or missing? Re-check walls, or raise <em>Bridge gaps</em> to close doorways.`;
+        return s;
+      }
+
+      // ------------------------------------------------------------- panel UI
+      function renderPanel() {
+        if (!state.iw) { return; }
+        const detectCtrls = `
+          <div class="section">
+            <h3>Tuning</h3>
+            <div class="ctrl">
+              <label>Line darkness <span class="val">${state.threshold}</span></label>
+              <input type="range" min="40" max="230" value="${state.threshold}" id="thr" />
+              <div class="hint" style="margin-top:4px">How dark a pixel must be to count as a wall line.</div>
+            </div>
+            <div class="ctrl">
+              <label>Bridge gaps <span class="val">${state.bridge}px</span></label>
+              <input type="range" min="0" max="30" value="${state.bridge}" id="brg" />
+              <div class="hint" style="margin-top:4px">Closes doorway openings so rooms enclose.</div>
+            </div>
+            <div class="ctrl" style="margin-top:14px">
+              <label>Scale <span class="val">${state.pxPerFoot ? state.pxPerFoot + " px/ft" : "not set"}</span></label>
+              <div class="field inline" style="margin-bottom:0">
+                <div><input type="number" id="scaleIn" placeholder="px per foot" value="${state.pxPerFoot || ""}" /></div>
+                <button class="btn btn--ghost btn--sm" id="applyScale">Set</button>
+              </div>
+              <div class="hint" style="margin-top:6px">Sets real wall lengths from pixels (optional).</div>
+            </div>
+          </div>`;
+
+        let body = "";
+        if (state.mode === "mark") {
+          panelTitle.textContent = "Mark walls";
+          const sel = selCount();
+          body = `
+            <div class="section">
+              <h3>Trace the walls</h3>
+              <p class="hint" id="markHint">${markHintHTML()}</p>
+              <div class="row-actions">
+                <button class="btn btn--sm" id="findRoomsBtn"${sel ? "" : " disabled style=\"opacity:.5\""}>Find rooms →</button>
+                <button class="btn btn--ghost btn--sm" id="clearWallsBtn">Clear selection</button>
+              </div>
+            </div>
+            ${detectCtrls}`;
+        } else if (state.mode === "rooms") {
+          panelTitle.textContent = "Rooms";
+          const roomList = state.rooms.length
+            ? state.rooms.map((r) => `
+              <div class="room-item" data-open="${r.id}">
+                <span class="nm">${escapeXml(r.name)}</span>
+                <span class="meta">${r.walls.length} walls${r.walls.some(w=>w.lengthInches!=null) ? " · " + r.walls.filter(w=>w.lengthInches!=null).length + " spec'd" : ""}</span>
+              </div>`).join("")
+            : `<p class="empty">No rooms yet.</p>`;
+          const naming = activeRoom() ? `
+            <div class="field" style="margin-top:4px">
+              <label>Name this room</label>
+              <input id="roomNameInput" value="${escapeXml(activeRoom().name)}" />
+            </div>
+            <div class="row-actions">
+              <button class="btn btn--sm" id="editWallsBtn">Edit walls →</button>
+              <button class="btn btn--ghost btn--sm" id="removeRoomBtn">Remove</button>
+            </div>` : "";
+          body = `
+            <div class="breadcrumb"><a id="backToMark">← Mark walls</a> / Rooms</div>
+            <div class="section">
+              <h3>Click a room on the plan</h3>
+              <p class="hint" id="roomsHint">${roomsHintHTML()}</p>
+              ${naming}
+            </div>`;
+          body += `
+            <div class="section">
+              <h3>Named rooms</h3>
+              ${roomList}
+              ${state.rooms.length ? `<button class="linkbtn" id="exportBtn">Export spec (JSON) →</button>` : ""}
+            </div>
+            ${detectCtrls}`;
+        } else if (state.mode === "wall") {
+          const room = activeRoom();
+          panelTitle.textContent = room.name;
+          const wallList = room.walls.map((w) => `
+            <div class="wall-item ${w.id === state.activeWallId ? "is-active" : ""}" data-wall="${w.id}">
+              <span class="nm">${escapeXml(w.name)}</span>
+              <span class="meta">${w.lengthInches != null ? w.lengthInches + '"' : Math.round(w.lenPx) + "px"}</span>
+              <span class="chip ${w.lengthInches != null ? "is-spec" : ""}">${w.lengthInches != null ? "spec'd" : "to spec"}</span>
+            </div>`).join("");
+          body = `
+            <div class="breadcrumb"><a id="backToRooms">← Rooms</a> / ${escapeXml(room.name)}</div>
+            <div class="section">
+              <h3>Walls — hover the plan to find them</h3>
+              <p class="hint">Hover a wall on the plan to highlight it, then click to spec.</p>
+              ${wallList}
+            </div>
+            ${activeWall() ? wallForm(activeWall()) : `<div class="section"><p class="empty">Select a wall to spec its dimensions and usable space.</p></div>`}
+            ${detectCtrls}`;
+        }
+        panelBody.innerHTML = body;
+        wirePanel();
+      }
+
+      function wallForm(w) {
+        const segRows = w.segments.map((s, i) => `
+          <div class="seg-row" data-seg="${i}">
+            <input type="number" class="seg-start" value="${s.start}" placeholder="start" />
+            <input type="number" class="seg-end" value="${s.end}" placeholder="end" />
+            <label class="seg-usable"><input type="checkbox" class="seg-use" ${s.usable ? "checked" : ""}/>usable</label>
+            <input class="seg-reason" value="${escapeXml(s.reason || "")}" placeholder="reason (e.g. window)" style="grid-column:1 / 3" />
+            <button class="seg-del" data-del="${i}" title="Remove">×</button>
+          </div>`).join("");
+        return `
+          <div class="section">
+            <h3>Spec · ${escapeXml(w.name)}</h3>
+            <div class="field">
+              <label>Wall name</label>
+              <input id="wnName" value="${escapeXml(w.name)}" />
+            </div>
+            <div class="field inline">
+              <div><label>Length (in)</label><input id="wnLen" type="number" value="${w.lengthInches ?? ""}" placeholder="${Math.round(w.lenPx)}px" /></div>
+              <div><label>Height (in)</label><input id="wnHt" type="number" value="${w.heightInches ?? ""}" /></div>
+            </div>
+            <h3 style="margin-top:18px">Usable / unusable space</h3>
+            ${segRows || `<p class="empty" style="margin:0 0 8px">No segments — whole wall usable.</p>`}
+            <div class="row-actions">
+              <button class="btn btn--ghost btn--sm" id="addSeg">+ Add segment</button>
+            </div>
+          </div>`;
+      }
+
+      function wirePanel() {
+        const thr = $("thr"), brg = $("brg");
+        if (thr) thr.addEventListener("input", (e) => { state.threshold = +e.target.value; syncVal(thr, state.threshold); debouncedRebuild(true); });
+        if (brg) brg.addEventListener("input", (e) => { state.bridge = +e.target.value; syncVal(brg, state.bridge + "px"); debouncedRebuild(false); });
+
+        // mark-mode actions
+        bind("findRoomsBtn", "click", () => { if (selCount() === 0) return; state.mode = "rooms"; state.activeRoomId = null; buildRooms(); renderPanel(); });
+        bind("clearWallsBtn", "click", () => { state.selWalls.fill(0); buildRooms(); renderPanel(); });
+        bind("backToMark", "click", () => { state.mode = "mark"; state.activeRoomId = null; state.activeWallId = null; state.hoverDarkLabel = -1; drawWalls(-1); renderOverlay(); renderPanel(); });
+
+        const applyScaleBtn = $("applyScale");
+        if (applyScaleBtn) applyScaleBtn.addEventListener("click", () => {
+          const v = parseFloat($("scaleIn").value);
+          state.pxPerFoot = v > 0 ? v : null;
+          state.rooms.forEach((r) => r.walls.forEach((w) => { if (w.lengthInches == null && state.pxPerFoot) w.lengthInches = Math.round((w.lenPx / state.pxPerFoot) * 12); }));
+          renderPanel(); renderOverlay();
+        });
+
+        const nameIn = $("roomNameInput");
+        if (nameIn) nameIn.addEventListener("input", (e) => { activeRoom().name = e.target.value; renderOverlayLabelsOnly(); });
+        bind("editWallsBtn", "click", () => { state.mode = "wall"; state.activeWallId = null; renderOverlay(); renderPanel(); });
+        bind("removeRoomBtn", "click", () => {
+          state.rooms = state.rooms.filter((r) => r.id !== state.activeRoomId);
+          state.activeRoomId = null; renderOverlay(); renderPanel();
+        });
+        bind("backToRooms", "click", () => { state.mode = "rooms"; state.activeWallId = null; state.hoverWallId = null; renderOverlay(); renderPanel(); });
+        bind("exportBtn", "click", openExport);
+
+        document.querySelectorAll("[data-open]").forEach((el) =>
+          el.addEventListener("click", () => { state.activeRoomId = el.dataset.open; state.mode = "wall"; state.activeWallId = null; renderOverlay(); renderPanel(); }));
+        document.querySelectorAll(".wall-item[data-wall]").forEach((el) =>
+          el.addEventListener("click", () => { state.activeWallId = el.dataset.wall; renderOverlay(); renderPanel(); }));
+
+        // wall form
+        const w = activeWall();
+        if (w) {
+          bindInput("wnName", (v) => { w.name = v; renderOverlay(); });
+          bindInput("wnLen", (v) => { w.lengthInches = v === "" ? null : +v; });
+          bindInput("wnHt", (v) => { w.heightInches = v === "" ? null : +v; });
+          bind("addSeg", "click", () => { w.segments.push({ start: 0, end: 0, usable: false, reason: "" }); renderPanel(); });
+          document.querySelectorAll(".seg-row").forEach((row) => {
+            const i = +row.dataset.seg;
+            row.querySelector(".seg-start").addEventListener("input", (e) => w.segments[i].start = +e.target.value);
+            row.querySelector(".seg-end").addEventListener("input", (e) => w.segments[i].end = +e.target.value);
+            row.querySelector(".seg-use").addEventListener("change", (e) => w.segments[i].usable = e.target.checked);
+            row.querySelector(".seg-reason").addEventListener("input", (e) => w.segments[i].reason = e.target.value);
+            row.querySelector("[data-del]").addEventListener("click", () => { w.segments.splice(i, 1); renderPanel(); });
+          });
+        }
+      }
+      function syncVal(input, txt) { const lab = input.previousElementSibling.querySelector(".val"); if (lab) lab.textContent = txt; }
+      function bind(id, ev, fn) { const el = $(id); if (el) el.addEventListener(ev, fn); }
+      function bindInput(id, fn) { const el = $(id); if (el) el.addEventListener("input", (e) => fn(e.target.value)); }
+      // update only labels/list without rebuilding the whole panel (keeps input focus)
+      function renderOverlayLabelsOnly() {
+        renderOverlay();
+        document.querySelectorAll("[data-open]").forEach((el) => {
+          const r = state.rooms.find((x) => x.id === el.dataset.open);
+          if (r) el.querySelector(".nm").textContent = r.name;
+        });
+      }
+
+      let rebuildTimer = null;
+      function debouncedRebuild(recomputeDarkFirst) {
+        clearTimeout(rebuildTimer);
+        rebuildTimer = setTimeout(() => {
+          if (recomputeDarkFirst) recomputeDark();
+          if (state.mode === "mark") { drawWalls(state.hoverDarkLabel); const mh = $("markHint"); if (mh) mh.innerHTML = markHintHTML(); }
+          buildRooms();
+        }, 120);
+      }
+
+      // ---------------------------------------------------------- export json
+      function openExport() {
+        const out = {
+          project: { name: "Untitled plan", source: "Artset Editor prototype" },
+          scalePxPerInch: state.pxPerFoot ? +(state.pxPerFoot / 12).toFixed(3) : null,
+          rooms: state.rooms.map((r) => ({
+            id: r.id, name: r.name,
+            walls: r.walls.map((w) => ({
+              id: w.id, name: w.name,
+              lengthInches: w.lengthInches, heightInches: w.heightInches,
+              segments: w.segments.map((s) => ({ start: s.start, end: s.end, usable: s.usable, reason: s.reason || undefined })),
+            })),
+          })),
+        };
+        $("exportText").value = JSON.stringify(out, null, 2);
+        $("exportDlg").showModal();
+      }
+      $("closeExport").addEventListener("click", () => $("exportDlg").close());
+    </script>
+  </body>
+</html>

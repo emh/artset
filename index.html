@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Artset — West Point Grey Residence</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Hanken+Grotesk:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="#/summary">
+        <span class="brand-mark">◇</span>
+        <span class="brand-text">
+          <span class="brand-name">Artset</span>
+          <span class="brand-sub">Placement Specification</span>
+        </span>
+      </a>
+      <nav class="primary-nav" id="primary-nav">
+        <a href="#/summary" data-route="summary">Project Summary</a>
+        <a href="#/art" data-route="art">Art Pieces</a>
+        <a href="#/rooms" data-route="rooms">Rooms</a>
+        <a href="#/floorplan" data-route="floorplan">Floorplan</a>
+      </nav>
+    </header>
+
+    <main id="app" class="app"></main>
+
+    <footer class="site-footer">
+      <span>West Point Grey Residence</span>
+      <span class="dot">·</span>
+      <span>Review prototype — read only</span>
+    </footer>
+
+    <script type="module" src="app.js"></script>
+  </body>
+</html>
