@@ -1,47 +1,79 @@
 import { html } from "htm/preact";
 import { useState, useEffect, useRef } from "preact/hooks";
 import { api } from "../api.js";
-import { navigate } from "../router.js";
 import { crumbs } from "../store.js";
 
-const money = (n) => (n == null || n === "" ? "" : "$" + Number(n).toLocaleString());
-const sizeLabel = (s) => `${+s.width_inches}″ × ${+s.height_inches}″${s.label ? " · " + s.label : ""}`;
+const blankDraft = () => ({ titleDescription: "", dimensions: "", customValues: {}, file: null, preview: "", error: "" });
+const inch = (n) => `${Math.round(Number(n) || 0)}"`;
+const sizeLine = (s) => `${+s.width_inches}x${+s.height_inches}"${s.label ? ` ${s.label}` : ""}`;
+const textForPiece = (p) => [p.title || "", p.description || ""].filter(Boolean).join("\n");
+const dimensionsForPiece = (p) => (p.sizes || []).map(sizeLine).join("\n");
 
-const emptyForm = () => ({ title: "", artist: "", medium: "", price: "", sizes: [{ width: "", height: "", label: "" }] });
+function parseTitleDescription(value) {
+  const lines = String(value || "").replace(/\r/g, "").split("\n");
+  const title = (lines.shift() || "").trim();
+  const description = lines.join("\n").trim();
+  return { title, description };
+}
+
+function parseDimensions(value) {
+  return String(value || "")
+    .replace(/\r/g, "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const nums = line.match(/(\d+(?:\.\d+)?)/g) || [];
+      const width = parseFloat(nums[0]);
+      const height = parseFloat(nums[1]);
+      const label = line.replace(/^\s*\d+(?:\.\d+)?\s*(?:"|in|inches)?\s*[xX×]\s*\d+(?:\.\d+)?\s*(?:"|in|inches)?\s*/i, "").trim();
+      return { width_inches: width, height_inches: height, label };
+    })
+    .filter((s) => s.width_inches > 0 && s.height_inches > 0);
+}
+
+function placementText(p) {
+  if (!p.placed) return "";
+  const size = p.placed.width_inches && p.placed.height_inches
+    ? ` · ${inch(p.placed.width_inches)} x ${inch(p.placed.height_inches)}`
+    : "";
+  const offset = p.placed.start_inches !== undefined && p.placed.start_inches !== null
+    ? ` · ${inch(p.placed.start_inches)} from left`
+    : "";
+  return `${p.placed.room_name || ""}\n${p.placed.wall_name || ""}${offset}${size}`;
+}
+
+function selectedSizeIndex(p) {
+  const fromMeta = Number(p.metadata && p.metadata.selectedSizeIndex);
+  if (Number.isInteger(fromMeta) && fromMeta >= 0 && fromMeta < (p.sizes || []).length) return fromMeta;
+  if (p.placed) {
+    const placed = (p.sizes || []).findIndex((s) => s.width_inches === p.placed.width_inches && s.height_inches === p.placed.height_inches);
+    if (placed >= 0) return placed;
+  }
+  return -1;
+}
+
+function customValuesForPiece(p) {
+  return { ...((p.metadata && p.metadata.customColumns) || {}) };
+}
 
 export function ArtView({ projectId }) {
   const [project, setProject] = useState(null);
   const [art, setArt] = useState(null);
-  const [open, setOpen] = useState(false);
-  const [editing, setEditing] = useState(null);
-  const [f, setF] = useState(emptyForm());
-  const [file, setFile] = useState(null);
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState(null);
-  const fileRef = useRef(null);
-
-  // "Place" flow: pick a room then a wall to jump to with this piece preselected
-  const [placing, setPlacing] = useState(null);   // the piece being placed
-  const [rooms, setRooms] = useState([]);
-  const [placeRoom, setPlaceRoom] = useState("");
-  const [walls, setWalls] = useState([]);
-  const [placeWall, setPlaceWall] = useState("");
-
-  async function openPlace(p) {
-    setPlacing(p); setPlaceRoom(""); setWalls([]); setPlaceWall("");
-    const { rooms } = await api.get(`/api/projects/${projectId}/rooms`);
-    setRooms(rooms);
-  }
-  async function chooseRoom(roomId) {
-    setPlaceRoom(roomId); setPlaceWall("");
-    if (!roomId) { setWalls([]); return; }
-    const { walls } = await api.get(`/api/rooms/${roomId}/walls`);
-    setWalls(walls);
-  }
-  function goPlace() {
-    if (!placeRoom || !placeWall) return;
-    navigate(`/projects/${projectId}/rooms/${placeRoom}/walls/${placeWall}?place=${placing.id}`);
-  }
+  const [edits, setEdits] = useState({});
+  const [draft, setDraft] = useState(blankDraft());
+  const [saving, setSaving] = useState({});
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [editingDims, setEditingDims] = useState(null);
+  const [editingColumn, setEditingColumn] = useState(null);
+  const [hoverHeader, setHoverHeader] = useState(false);
+  const [hoverRow, setHoverRow] = useState(null);
+  const fileRefs = useRef({});
+  const columnInputRefs = useRef({});
+  const draftFileRef = useRef(null);
+  const headerHoverTimer = useRef(null);
+  const rowHoverTimer = useRef(null);
+  const focusedColumnRef = useRef(null);
 
   useEffect(() => {
     api.get(`/api/projects/${projectId}`).then((d) => {
@@ -50,174 +82,380 @@ export function ArtView({ projectId }) {
     }).catch(() => {});
     refresh();
   }, [projectId]);
+  useEffect(() => {
+    if (!editingColumn) return;
+    if (focusedColumnRef.current === editingColumn) return;
+    const input = columnInputRefs.current[editingColumn];
+    if (!input) return;
+    focusedColumnRef.current = editingColumn;
+    input.focus();
+    input.select();
+  }, [editingColumn]);
 
   async function refresh() {
     const { art } = await api.get(`/api/projects/${projectId}/art`);
     setArt(art);
+    setEdits(Object.fromEntries(art.map((p) => [p.id, {
+      titleDescription: textForPiece(p),
+      dimensions: dimensionsForPiece(p),
+      customValues: customValuesForPiece(p),
+      error: "",
+    }])));
   }
 
-  function openAdd() { setEditing(null); setF(emptyForm()); setFile(null); setErr(null); setOpen(true); }
-  function openEdit(p) {
-    setEditing(p.id);
-    setF({ title: p.title, artist: p.artist || "", medium: p.medium || "", price: p.price ?? "",
-      sizes: (p.sizes.length ? p.sizes : [{}]).map((s) => ({ width: s.width_inches ?? "", height: s.height_inches ?? "", label: s.label || "" })) });
-    setFile(null); setErr(null); setOpen(true);
+  function setEdit(id, patch) {
+    setEdits((prev) => ({ ...prev, [id]: { ...(prev[id] || {}), ...patch } }));
   }
-  function close() { setOpen(false); setEditing(null); setFile(null); }
 
-  const setField = (k) => (e) => setF((p) => ({ ...p, [k]: e.target.value }));
-  const setSize = (i, k) => (e) => setF((p) => ({ ...p, sizes: p.sizes.map((s, j) => (j === i ? { ...s, [k]: e.target.value } : s)) }));
-  const addSize = () => setF((p) => ({ ...p, sizes: [...p.sizes, { width: "", height: "", label: "" }] }));
-  const removeSize = (i) => setF((p) => ({ ...p, sizes: p.sizes.filter((_, j) => j !== i) }));
+  function showHeaderControls() {
+    if (headerHoverTimer.current) clearTimeout(headerHoverTimer.current);
+    setHoverHeader(true);
+  }
 
-  async function submit(e) {
-    e.preventDefault();
-    setErr(null);
-    const sizes = f.sizes
-      .map((s) => ({ width_inches: parseFloat(s.width), height_inches: parseFloat(s.height), label: s.label.trim() }))
-      .filter((s) => s.width_inches > 0 && s.height_inches > 0);
-    if (!f.title.trim()) { setErr("Title is required."); return; }
-    if (!sizes.length) { setErr("Add at least one size (width × height)."); return; }
-    setBusy(true);
+  function hideHeaderControlsSoon() {
+    if (headerHoverTimer.current) clearTimeout(headerHoverTimer.current);
+    headerHoverTimer.current = setTimeout(() => setHoverHeader(false), 140);
+  }
+
+  function showRowControls(id) {
+    if (rowHoverTimer.current) clearTimeout(rowHoverTimer.current);
+    setHoverRow(id);
+  }
+
+  function hideRowControlsSoon() {
+    if (rowHoverTimer.current) clearTimeout(rowHoverTimer.current);
+    rowHoverTimer.current = setTimeout(() => setHoverRow(null), 140);
+  }
+
+  function piecePayload(row) {
+    const { title, description } = parseTitleDescription(row.titleDescription);
+    const sizes = parseDimensions(row.dimensions);
+    if (!title && !sizes.length) return null;
+    if (!title) return { error: "Title is required." };
+    if (!sizes.length) return { error: "Add at least one W x H measurement." };
+    return { title, description, sizes, metadata: { customColumns: row.customValues || {} } };
+  }
+
+  async function savePiece(p) {
+    const row = edits[p.id];
+    if (!row) return;
+    const payload = piecePayload(row);
+    if (!payload) return;
+    if (payload.error) { setEdit(p.id, { error: payload.error }); return; }
+    const original = { titleDescription: textForPiece(p), dimensions: dimensionsForPiece(p) };
+    if (row.titleDescription === original.titleDescription && row.dimensions === original.dimensions) {
+      setEditingDims(null);
+      return;
+    }
+    setSaving((prev) => ({ ...prev, [p.id]: true }));
     try {
-      const payload = { title: f.title.trim(), artist: f.artist.trim(), medium: f.medium.trim(),
-        price: f.price === "" ? null : parseFloat(f.price), sizes };
-      const res = editing
-        ? await api.patch(`/api/art/${editing}`, payload)
-        : await api.post(`/api/projects/${projectId}/art`, payload);
-      const pieceId = res.art.id;
-      if (file) {
-        const fd = new FormData(); fd.append("image", file);
-        await api.post(`/api/art/${pieceId}/image`, fd);
-      }
+      await api.patch(`/api/art/${p.id}`, payload);
+      setEditingDims(null);
       await refresh();
-      close();
     } catch (ex) {
-      setErr(ex.message || "Could not save");
-    } finally { setBusy(false); }
+      setEdit(p.id, { error: ex.message || "Could not save." });
+    } finally {
+      setSaving((prev) => ({ ...prev, [p.id]: false }));
+    }
   }
 
-  async function remove(p) {
-    if (!confirm(`Delete “${p.title}”?`)) return;
-    await api.del(`/api/art/${p.id}`);
+  async function saveCustomValue(p, columnId) {
+    const row = edits[p.id];
+    if (!row) return;
+    const customValues = { ...customValuesForPiece(p), ...(row.customValues || {}) };
+    const original = customValuesForPiece(p)[columnId] || "";
+    const next = customValues[columnId] || "";
+    if (next === original) return;
+    setSaving((prev) => ({ ...prev, [p.id]: true }));
+    try {
+      await api.patch(`/api/art/${p.id}`, { metadata: { customColumns: customValues } });
+      await refresh();
+    } catch (ex) {
+      setEdit(p.id, { error: ex.message || "Could not save." });
+    } finally {
+      setSaving((prev) => ({ ...prev, [p.id]: false }));
+    }
+  }
+
+  async function selectSize(p, index) {
+    setSaving((prev) => ({ ...prev, [p.id]: true }));
+    try {
+      await api.patch(`/api/art/${p.id}`, { metadata: { selectedSizeIndex: index } });
+      await refresh();
+    } catch (ex) {
+      setEdit(p.id, { error: ex.message || "Could not select size." });
+    } finally {
+      setSaving((prev) => ({ ...prev, [p.id]: false }));
+    }
+  }
+
+  async function createDraft() {
+    const parsed = parseTitleDescription(draft.titleDescription);
+    const sizes = parseDimensions(draft.dimensions);
+    if (!parsed.title || !sizes.length) return;
+    const payload = piecePayload(draft);
+    if (!payload) return;
+    if (payload.error) { setDraft((prev) => ({ ...prev, error: payload.error })); return; }
+    setSaving((prev) => ({ ...prev, draft: true }));
+    try {
+      const res = await api.post(`/api/projects/${projectId}/art`, payload);
+      if (draft.file) await uploadImage(res.art.id, draft.file);
+      setDraft(blankDraft());
+      await refresh();
+    } catch (ex) {
+      setDraft((prev) => ({ ...prev, error: ex.message || "Could not save." }));
+    } finally {
+      setSaving((prev) => ({ ...prev, draft: false }));
+    }
+  }
+
+  async function uploadImage(id, file) {
+    const fd = new FormData();
+    fd.append("image", file);
+    await api.post(`/api/art/${id}/image`, fd);
+  }
+
+  async function setPieceImage(p, file) {
+    if (!file) return;
+    setSaving((prev) => ({ ...prev, [p.id]: true }));
+    try {
+      await uploadImage(p.id, file);
+      await refresh();
+    } catch (ex) {
+      setEdit(p.id, { error: ex.message || "Could not upload image." });
+    } finally {
+      setSaving((prev) => ({ ...prev, [p.id]: false }));
+    }
+  }
+
+  async function confirmDelete() {
+    if (!deleteTarget) return;
+    await api.del(`/api/art/${deleteTarget.id}`);
+    setDeleteTarget(null);
     refresh();
   }
+
+  async function saveColumns(columns) {
+    const res = await api.patch(`/api/projects/${projectId}`, { metadata: { artColumns: columns } });
+    setProject(res.project);
+    return res.project;
+  }
+
+  async function addColumn() {
+    const column = { id: `col_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`, name: "" };
+    const next = [...columns, column];
+    await saveColumns(next);
+    setEditingColumn(column.id);
+  }
+
+  async function renameColumn(columnId, name) {
+    await saveColumns(columns.map((c) => (c.id === columnId ? { ...c, name: String(name || "").trim() } : c)));
+    setEditingColumn(null);
+    focusedColumnRef.current = null;
+  }
+
+  async function deleteColumn(columnId) {
+    await saveColumns(columns.filter((c) => c.id !== columnId));
+  }
+
+  function imageCell(p) {
+    return html`
+      <button class="art-sheet-image" type="button"
+        onClick=${() => fileRefs.current[p.id] && fileRefs.current[p.id].click()}
+        onDragOver=${(e) => e.preventDefault()}
+        onDrop=${(e) => {
+          e.preventDefault();
+          setPieceImage(p, e.dataTransfer.files[0]);
+        }}>
+        ${p.has_image
+          ? html`<img src=${`/api/art/${p.id}/image?v=${encodeURIComponent(p.image_v || "")}`} alt=${p.title} loading="lazy" />`
+          : html`<span>Drop image</span>`}
+      </button>
+      <input ref=${(el) => { fileRefs.current[p.id] = el; }} type="file" accept="image/*" style="display:none"
+        onChange=${(e) => setPieceImage(p, e.target.files[0])} />`;
+  }
+
+  function draftImageCell() {
+    return html`
+      <button class="art-sheet-image" type="button"
+        onClick=${() => draftFileRef.current && draftFileRef.current.click()}
+        onDragOver=${(e) => e.preventDefault()}
+        onDrop=${(e) => {
+          e.preventDefault();
+          const file = e.dataTransfer.files[0] || null;
+          setDraft((prev) => ({ ...prev, file, preview: file ? URL.createObjectURL(file) : "" }));
+        }}>
+        ${draft.preview ? html`<img src=${draft.preview} alt="preview" />` : html`<span>Drop image</span>`}
+      </button>
+      <input ref=${draftFileRef} type="file" accept="image/*" style="display:none"
+        onChange=${(e) => {
+          const file = e.target.files[0] || null;
+          setDraft((prev) => ({ ...prev, file, preview: file ? URL.createObjectURL(file) : "" }));
+        }} />`;
+  }
+
+  function dimensionsCell(p, row) {
+    if (editingDims === p.id) {
+      return html`
+        <textarea class="sheet-input sheet-input--dims" value=${row.dimensions}
+          onInput=${(e) => setEdit(p.id, { dimensions: e.target.value, error: "" })}
+          onBlur=${() => savePiece(p)}
+          placeholder=${"24x36\n30x40 framed"}
+          autofocus></textarea>`;
+    }
+    const checkedIndex = selectedSizeIndex(p);
+    return html`
+      <div class="sheet-dimensions" onDblClick=${() => setEditingDims(p.id)}>
+        ${(p.sizes || []).map((s, i) => html`
+          <label class="sheet-dimension" key=${s.id || i}>
+            <input type="checkbox" checked=${checkedIndex === i}
+              onClick=${(e) => e.stopPropagation()}
+              onChange=${() => selectSize(p, i)} />
+            <span>${sizeLine(s)}</span>
+          </label>`)}
+        <button class="sheet-cell-edit" type="button" onClick=${() => setEditingDims(p.id)}>Edit</button>
+      </div>`;
+  }
+
+  function customCell(p, row, column) {
+    const value = (row.customValues && row.customValues[column.id]) || "";
+    return html`
+      <textarea class="sheet-input sheet-input--custom" value=${value}
+        onInput=${(e) => setEdit(p.id, {
+          customValues: { ...(row.customValues || {}), [column.id]: e.target.value },
+          error: "",
+        })}
+        onBlur=${() => saveCustomValue(p, column.id)}></textarea>`;
+  }
+
+  const rows = art || [];
+  const columns = (project && project.metadata && project.metadata.artColumns) || [];
+  const gridTemplate = `108px 320px 220px minmax(280px, 1fr) ${columns.map(() => "220px").join(" ")}`;
 
   return html`
     <main>
       <div class="wrap">
-        <div>
-          <div class="flex between items-center" style="margin-bottom:28px">
-            <div class="eyebrow">Art inventory</div>
-            ${!open && html`<button class="btn" onClick=${openAdd}>Add art</button>`}
-          </div>
-
-          ${placing && html`
-            <div class="card" style="margin-bottom:36px">
-              <div class="label" style="margin-bottom:14px">Place “${placing.title}”</div>
-              <div class="flex gap-md" style="flex-wrap:wrap;align-items:flex-end">
-                <label class="field" style="flex:1;min-width:180px;margin:0"><span class="label">Room</span>
-                  <select class="input" value=${placeRoom} onChange=${(e) => chooseRoom(e.target.value)}>
-                    <option value="">Select a room…</option>
-                    ${rooms.map((r) => html`<option value=${r.id} key=${r.id}>${r.name}</option>`)}
-                  </select></label>
-                <label class="field" style="flex:1;min-width:180px;margin:0"><span class="label">Wall</span>
-                  <select class="input" value=${placeWall} onChange=${(e) => setPlaceWall(e.target.value)} disabled=${!walls.length}>
-                    <option value="">${placeRoom ? (walls.length ? "Select a wall…" : "No walls in this room") : "Choose a room first"}</option>
-                    ${walls.map((w) => html`<option value=${w.id} key=${w.id}>${w.name}</option>`)}
-                  </select></label>
-                <div class="flex gap-sm">
-                  <button class="btn" onClick=${goPlace} disabled=${!placeWall}>Place on wall →</button>
-                  <button class="btn btn--ghost" onClick=${() => setPlacing(null)}>Cancel</button>
-                </div>
-              </div>
-            </div>`}
-
-          ${open && html`
-            <form class="card" style="margin-bottom:40px" onSubmit=${submit} autocomplete="off">
-              <div class="art-form-grid">
-                <div>
-                  <label class="field"><span class="label">Title</span>
-                    <input class="input" name="art-title" autocomplete="off" value=${f.title} onInput=${setField("title")} placeholder="Blue Fragment Study" autofocus /></label>
-                  <div class="flex gap-md">
-                    <label class="field" style="flex:1"><span class="label">Artist</span>
-                      <input class="input" name="art-artist" autocomplete="off" value=${f.artist} onInput=${setField("artist")} placeholder="Mara Ellison" /></label>
-                    <label class="field" style="flex:1"><span class="label">Price</span>
-                      <input class="input" name="art-price" inputmode="decimal" autocomplete="off" value=${f.price} onInput=${setField("price")} placeholder="3200" /></label>
-                  </div>
-                  <label class="field"><span class="label">Medium</span>
-                    <input class="input" name="art-medium" autocomplete="off" value=${f.medium} onInput=${setField("medium")} placeholder="Acrylic on canvas" /></label>
-
-                  <div class="label" style="margin:18px 0 10px">Sizes</div>
-                  ${f.sizes.map((s, i) => html`
-                    <div class="size-row" key=${i}>
-                      <input class="input" name=${`art-size-${i}-width`} inputmode="decimal" autocomplete="off" value=${s.width} onInput=${setSize(i, "width")} placeholder="W″" />
-                      <span class="muted">×</span>
-                      <input class="input" name=${`art-size-${i}-height`} inputmode="decimal" autocomplete="off" value=${s.height} onInput=${setSize(i, "height")} placeholder="H″" />
-                      <input class="input" name=${`art-size-${i}-label`} autocomplete="off" value=${s.label} onInput=${setSize(i, "label")} placeholder="label (optional)" />
-                      ${f.sizes.length > 1 && html`<button type="button" class="linkbtn muted" onClick=${() => removeSize(i)}>✕</button>`}
-                    </div>
-                  `)}
-                  <button type="button" class="linkbtn" style="margin-top:6px" onClick=${addSize}>+ Add size</button>
-                </div>
-
-                <div>
-                  <span class="label" style="display:block;margin-bottom:8px">Image</span>
-                  <div class="art-drop" onClick=${() => fileRef.current && fileRef.current.click()}>
-                    ${file
-                      ? html`<img src=${URL.createObjectURL(file)} alt="preview" />`
-                      : editing && art && art.find((x) => x.id === editing && x.has_image)
-                        ? html`<img src=${`/api/art/${editing}/image?v=${encodeURIComponent((art.find((x) => x.id === editing) || {}).image_v || "")}`} alt="current" />`
-                        : html`<span class="muted" style="font-size:13px">Click to add an image</span>`}
-                  </div>
-                  <input ref=${fileRef} type="file" accept="image/*" style="display:none"
-                    onChange=${(e) => setFile(e.target.files[0] || null)} />
-                </div>
-              </div>
-
-              ${err && html`<p style="color:var(--warn);font-size:13px;margin:6px 0 0">${err}</p>`}
-              <div class="flex gap-sm" style="margin-top:22px">
-                <button class="btn" type="submit" disabled=${busy}>${busy ? "Saving…" : editing ? "Save changes" : "Add to inventory"}</button>
-                <button class="btn btn--ghost" type="button" onClick=${close}>Cancel</button>
-              </div>
-            </form>
-          `}
-
-          ${art === null && html`<p class="spinner">Loading…</p>`}
-          ${art && art.length === 0 && !open && html`
-            <div class="empty"><p>No art yet.</p>
-              <p class="mt-md"><button class="linkbtn" onClick=${openAdd}>Add your first piece</button></p></div>`}
-
-          ${art && art.length > 0 && html`
-            <div class="art-grid">
-              ${art.map((p) => html`
-                <div class="art-card" key=${p.id}>
-                  <div class="art-thumb">
-                    ${p.has_image
-                      ? html`<img src=${`/api/art/${p.id}/image?v=${encodeURIComponent(p.image_v || "")}`} alt=${p.title} loading="lazy" />`
-                      : html`<span class="muted mono">no image</span>`}
-                  </div>
-                  <div class="art-meta">
-                    <h3>${p.title}</h3>
-                    ${p.artist && html`<div class="muted">${p.artist}</div>`}
-                    ${p.medium && html`<div class="mono muted">${p.medium}</div>`}
-                    <div class="art-sizes">${p.sizes.map((s) => html`<span class="chip" key=${s.id}>${sizeLabel(s)}</span>`)}</div>
-                    ${p.placed && html`<div class="placed-tag">Placed · ${p.placed.room_name} · ${p.placed.wall_name}</div>`}
-                    <div class="flex between items-center" style="margin-top:14px">
-                      <span class="mono">${money(p.price)}</span>
-                      <span class="flex gap-sm">
-                        <button class="linkbtn" onClick=${() => openPlace(p)}>${p.placed ? "Move" : "Place"}</button>
-                        <button class="linkbtn muted" onClick=${() => openEdit(p)}>Edit</button>
-                        <button class="linkbtn muted" onClick=${() => remove(p)}>Delete</button>
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              `)}
+        <div class="art-sheet-frame">
+          <div class="art-sheet">
+            <div class="art-sheet-head" style=${`grid-template-columns:${gridTemplate}`}
+              onMouseEnter=${showHeaderControls}
+              onMouseLeave=${hideHeaderControlsSoon}
+              onFocusIn=${showHeaderControls}
+              onFocusOut=${hideHeaderControlsSoon}>
+              <div class="art-sheet-sticky art-sheet-sticky--left">Image</div>
+              <div>Title / Description</div>
+              <div>Dimensions (WxH")</div>
+              <div>Placement</div>
+              ${columns.map((column) => html`
+                <div class=${"art-custom-head" + (editingColumn === column.id ? " is-editing" : "")} key=${column.id}>
+                  <input ref=${(el) => { columnInputRefs.current[column.id] = el; }}
+                    value=${column.name}
+                    placeholder="Column"
+                    onFocus=${() => setEditingColumn(column.id)}
+                    onInput=${(e) => {
+                      const next = columns.map((c) => (c.id === column.id ? { ...c, name: e.target.value } : c));
+                      setProject((prev) => ({ ...prev, metadata: { ...((prev && prev.metadata) || {}), artColumns: next } }));
+                    }}
+                    onBlur=${(e) => renameColumn(column.id, e.target.value)}
+                    onKeyDown=${(e) => e.key === "Enter" && e.target.blur()} />
+                  <button class="art-delete-column" type="button" title="Delete column" aria-label=${column.name ? `Delete ${column.name} column` : "Delete column"}
+                    onPointerDown=${(e) => { e.preventDefault(); deleteColumn(column.id); }}
+                    onClick=${() => deleteColumn(column.id)}>X</button>
+                </div>`)}
             </div>
-          `}
+
+            ${art === null && html`<p class="spinner">Loading...</p>`}
+
+            ${rows.map((p) => {
+              const row = edits[p.id] || { titleDescription: textForPiece(p), dimensions: dimensionsForPiece(p), error: "" };
+              return html`
+                <div class="art-sheet-row" key=${p.id} style=${`grid-template-columns:${gridTemplate}`}
+                  onMouseEnter=${() => showRowControls(p.id)}
+                  onMouseLeave=${hideRowControlsSoon}
+                  onFocusIn=${() => showRowControls(p.id)}
+                  onFocusOut=${hideRowControlsSoon}>
+                  <div class="art-sheet-cell art-sheet-cell--image art-sheet-sticky art-sheet-sticky--left">${imageCell(p)}</div>
+                  <div class="art-sheet-cell">
+                    <textarea class="sheet-input sheet-input--title" value=${row.titleDescription}
+                      onInput=${(e) => setEdit(p.id, { titleDescription: e.target.value, error: "" })}
+                      onBlur=${() => savePiece(p)}
+                      placeholder=${"Title\nDescription"}></textarea>
+                    ${row.error && html`<div class="sheet-error">${row.error}</div>`}
+                  </div>
+                  <div class="art-sheet-cell">
+                    ${dimensionsCell(p, row)}
+                  </div>
+                  <div class="art-sheet-cell">
+                    <div class="sheet-placement">${placementText(p) || html`<span class="muted">Not placed</span>`}</div>
+                  </div>
+                  ${columns.map((column) => html`
+                    <div class="art-sheet-cell" key=${column.id}>
+                      ${customCell(p, row, column)}
+                    </div>`)}
+                  ${saving[p.id] && html`<span class="sheet-saving sheet-saving--row">Saving</span>`}
+                </div>`;
+            })}
+
+            ${art !== null && html`
+              <div class="art-sheet-row art-sheet-row--draft" style=${`grid-template-columns:${gridTemplate}`}>
+                <div class="art-sheet-cell art-sheet-cell--image art-sheet-sticky art-sheet-sticky--left">${draftImageCell()}</div>
+                <div class="art-sheet-cell">
+                  <textarea class="sheet-input sheet-input--title" value=${draft.titleDescription}
+                    onInput=${(e) => setDraft((prev) => ({ ...prev, titleDescription: e.target.value, error: "" }))}
+                    onBlur=${createDraft}
+                    placeholder=${"Title\nDescription"}></textarea>
+                  ${draft.error && html`<div class="sheet-error">${draft.error}</div>`}
+                </div>
+                <div class="art-sheet-cell">
+                  <textarea class="sheet-input sheet-input--dims" value=${draft.dimensions}
+                    onInput=${(e) => setDraft((prev) => ({ ...prev, dimensions: e.target.value, error: "" }))}
+                    onBlur=${createDraft}
+                    placeholder=${"24x36\n30x40 framed"}></textarea>
+                </div>
+                <div class="art-sheet-cell">
+                  <div class="sheet-placement"><span class="muted">Not placed</span></div>
+                </div>
+                ${columns.map((column) => html`
+                  <div class="art-sheet-cell" key=${column.id}>
+                    <textarea class="sheet-input sheet-input--custom" value=${draft.customValues[column.id] || ""}
+                      onInput=${(e) => setDraft((prev) => ({
+                        ...prev,
+                        customValues: { ...(prev.customValues || {}), [column.id]: e.target.value },
+                      }))}></textarea>
+                  </div>`)}
+                ${saving.draft && html`<span class="sheet-saving sheet-saving--row">Saving</span>`}
+              </div>`}
+          </div>
+          <div class="art-add-column-hit"
+            onMouseEnter=${showHeaderControls}
+            onMouseLeave=${hideHeaderControlsSoon}>
+            <button class=${"art-add-column" + (hoverHeader ? " is-visible" : "")} type="button" title="Add column" aria-label="Add column"
+              onClick=${addColumn}>+</button>
+          </div>
+          <div class="art-row-delete-rail">
+            ${rows.map((p, i) => html`
+              <div class="art-row-delete-hit" key=${p.id} style=${`top:${i * 113}px`}
+                onMouseEnter=${() => showRowControls(p.id)}
+                onMouseLeave=${hideRowControlsSoon}>
+                <button class=${"wall-span-delete art-row-delete" + (hoverRow === p.id ? " is-visible" : "")} type="button"
+                  aria-label=${`Delete ${p.title}`}
+                  onClick=${() => setDeleteTarget(p)}>X</button>
+              </div>`)}
+          </div>
         </div>
       </div>
+
+      ${deleteTarget && html`
+        <div class="modal-backdrop" onClick=${() => setDeleteTarget(null)}>
+          <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="art-delete-title" onClick=${(e) => e.stopPropagation()}>
+            <h2 id="art-delete-title">Delete art</h2>
+            <p>This will remove “${deleteTarget.title}” from the inventory and any wall placement.</p>
+            <div class="modal-actions">
+              <button class="btn btn--ghost" type="button" onClick=${() => setDeleteTarget(null)}>Cancel</button>
+              <button class="btn" type="button" onClick=${confirmDelete}>Delete</button>
+            </div>
+          </div>
+        </div>`}
     </main>
   `;
 }

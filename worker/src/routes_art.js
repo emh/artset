@@ -18,11 +18,29 @@ function cleanSizes(raw) {
     .filter((s) => s.width_inches > 0 && s.height_inches > 0);
 }
 
+function cleanMeta(raw, fallback) {
+  const base = fallback ? parseMeta(fallback) : {};
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return base;
+  return { ...base, ...raw };
+}
+
+function parseMeta(raw) {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
 const shapeArt = (a, sizes, placed) => ({
   id: a.id, project_id: a.project_id, title: a.title, artist: a.artist, medium: a.medium,
   price: a.price, status: a.status, has_image: !!a.image_key, image_v: a.image_key || null, created_at: a.created_at,
+  description: parseMeta(a.metadata_json).description || "",
+  metadata: parseMeta(a.metadata_json),
   sizes: sizes || [],
-  placed: placed || null,   // { wall_id, wall_name, room_name } when placed, else null
+  placed: placed || null,
 });
 
 async function sizesFor(env, artIds) {
@@ -48,15 +66,27 @@ export async function listArt({ env, session, params }) {
   ).bind(project.id).all();
   const sizeMap = await sizesFor(env, results.map((a) => a.id));
   const placedRows = (await env.DB.prepare(
-    `SELECT pl.art_piece_id, pl.wall_id, w.name AS wall_name, r.name AS room_name
+    `SELECT pl.art_piece_id, pl.wall_id, pl.start_inches, pl.center_height_inches,
+            w.name AS wall_name, r.name AS room_name,
+            sz.width_inches, sz.height_inches, sz.label AS size_label
        FROM placements pl JOIN walls w ON w.id = pl.wall_id JOIN rooms r ON r.id = w.room_id
+       JOIN art_sizes sz ON sz.id = pl.art_size_id
       WHERE r.project_id = ?`
   ).bind(project.id).all()).results;
-  const placedMap = new Map(placedRows.map((p) => [p.art_piece_id, { wall_id: p.wall_id, wall_name: p.wall_name, room_name: p.room_name }]));
+  const placedMap = new Map(placedRows.map((p) => [p.art_piece_id, {
+    wall_id: p.wall_id,
+    wall_name: p.wall_name,
+    room_name: p.room_name,
+    start_inches: p.start_inches,
+    center_height_inches: p.center_height_inches,
+    width_inches: p.width_inches,
+    height_inches: p.height_inches,
+    size_label: p.size_label,
+  }]));
   return json({ art: results.map((a) => shapeArt(a, sizeMap.get(a.id), placedMap.get(a.id))) });
 }
 
-// POST /api/projects/:id/art  { title, artist, medium, price, sizes:[{width,height,label}] }
+// POST /api/projects/:id/art  { title, description, metadata, sizes:[{width,height,label}] }
 export async function createArt({ env, session, params, request }) {
   const project = await loadProject(env, session, params.id);
   if (!project) return error(404, "Project not found");
@@ -65,14 +95,15 @@ export async function createArt({ env, session, params, request }) {
   if (!title) return error(400, "Title is required");
   const sizes = cleanSizes(b.sizes);
   if (!sizes.length) return error(400, "Add at least one size (width × height)");
+  const metadata = cleanMeta({ ...(b.metadata || {}), description: String(b.description || "").trim() });
 
   const aid = id("art");
   const now = nowMs();
   const stmts = [
     env.DB.prepare(
-      "INSERT INTO art_pieces (id, project_id, title, artist, medium, image_key, price, status, created_at) VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?)"
+      "INSERT INTO art_pieces (id, project_id, title, artist, medium, image_key, price, status, created_at, metadata_json) VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)"
     ).bind(aid, project.id, title, String(b.artist || "").trim() || null, String(b.medium || "").trim() || null,
-      num(b.price), String(b.status || "Selected"), now),
+      num(b.price), String(b.status || "Selected"), now, JSON.stringify(metadata)),
   ];
   const outSizes = [];
   for (const s of sizes) {
@@ -83,7 +114,7 @@ export async function createArt({ env, session, params, request }) {
     ).bind(sid, aid, s.width_inches, s.height_inches, s.label));
   }
   await env.DB.batch(stmts);
-  return json({ art: shapeArt({ id: aid, project_id: project.id, title, artist: b.artist || null, medium: b.medium || null, price: num(b.price), status: "Selected", image_key: null, created_at: now }, outSizes) });
+  return json({ art: shapeArt({ id: aid, project_id: project.id, title, artist: b.artist || null, medium: b.medium || null, price: num(b.price), status: "Selected", image_key: null, created_at: now, metadata_json: JSON.stringify(metadata) }, outSizes) });
 }
 
 // GET /api/art/:id
@@ -94,7 +125,7 @@ export async function getArt({ env, session, params }) {
   return json({ art: shapeArt(a, sizeMap.get(a.id)) });
 }
 
-// PATCH /api/art/:id  { title?, artist?, medium?, price?, status?, sizes? }
+// PATCH /api/art/:id  { title?, description?, metadata?, artist?, medium?, price?, status?, sizes? }
 export async function updateArt({ env, session, params, request }) {
   const a = await artScoped(env, session, params.id);
   if (!a) return error(404, "Art piece not found");
@@ -105,10 +136,15 @@ export async function updateArt({ env, session, params, request }) {
   const medium = b.medium !== undefined ? (String(b.medium).trim() || null) : a.medium;
   const price = b.price !== undefined ? num(b.price) : a.price;
   const status = b.status !== undefined ? String(b.status) : a.status;
+  const metadataPatch = b.description !== undefined
+    ? { ...(b.metadata || {}), description: String(b.description || "").trim() }
+    : b.metadata;
+  const metadata = metadataPatch !== undefined ? cleanMeta(metadataPatch, a.metadata_json) : parseMeta(a.metadata_json);
+  const metadataJson = JSON.stringify(metadata);
 
   const stmts = [
-    env.DB.prepare("UPDATE art_pieces SET title=?, artist=?, medium=?, price=?, status=? WHERE id=?")
-      .bind(title, artist, medium, price, status, a.id),
+    env.DB.prepare("UPDATE art_pieces SET title=?, artist=?, medium=?, price=?, status=?, metadata_json=? WHERE id=?")
+      .bind(title, artist, medium, price, status, metadataJson, a.id),
   ];
   let outSizes = null;
   if (b.sizes !== undefined) {
@@ -125,7 +161,7 @@ export async function updateArt({ env, session, params, request }) {
   }
   await env.DB.batch(stmts);
   if (!outSizes) outSizes = (await sizesFor(env, [a.id])).get(a.id) || [];
-  return json({ art: shapeArt({ ...a, title, artist, medium, price, status }, outSizes) });
+  return json({ art: shapeArt({ ...a, title, artist, medium, price, status, metadata_json: metadataJson }, outSizes) });
 }
 
 // DELETE /api/art/:id
