@@ -46,6 +46,7 @@ export function WallSpecEditor({ wall, projectId, placeArtId, onChange }) {
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [viewport, setViewport] = useState({ w: 0, h: 0 });
+  const [hoverSpan, setHoverSpan] = useState(null);
 
   const svgRef = useRef(null);
   const viewportRef = useRef(null);
@@ -66,7 +67,7 @@ export function WallSpecEditor({ wall, projectId, placeArtId, onChange }) {
   const rulerH = 24;
   const rulerTickLen = 5;
   const rulerLabelSize = 10;
-  const rulerLabelY = 19;
+  const rulerLabelY = 12;
   const canPan = zoom > 1.01;
   const maxRendererH = Math.max(120, Math.min(640, (viewport.windowH || 720) - 330));
   const baseScale = viewport.w ? Math.min(viewport.w / L, maxRendererH / bandH) : 0;
@@ -368,7 +369,7 @@ export function WallSpecEditor({ wall, projectId, placeArtId, onChange }) {
             <rect class="ev-band" x="0" y="0" width=${L} height=${bandH} onPointerDown=${mode === "usable" ? onDownNew : undefined} />
             ${segments.map((s, i) => html`
               <g key=${i}>
-                <rect class="ev-usable" x=${s.start} y="0" width=${Math.max(0, s.end - s.start)} height=${bandH}
+                <rect class=${"ev-usable" + (hoverSpan === i ? " is-hover" : "")} x=${s.start} y="0" width=${Math.max(0, s.end - s.start)} height=${bandH}
                   onPointerDown=${mode === "usable" ? onDownNew : undefined} />
                 ${mode === "usable" && ["start", "end"].map((edge) => html`
                   <g key=${edge}>
@@ -403,9 +404,15 @@ export function WallSpecEditor({ wall, projectId, placeArtId, onChange }) {
             if (visibleEnd - visibleStart < 24) return null;
             const x = (visibleStart + visibleEnd) / 2;
             return html`
-              <div class="wall-span-control" key=${i} style=${`left:${x}px`}>
+              <div class=${"wall-span-control" + (hoverSpan === i ? " is-hover" : "")} key=${i} style=${`left:${x}px`}
+                onMouseEnter=${() => setHoverSpan(i)}
+                onMouseLeave=${() => setHoverSpan(null)}
+                onPointerEnter=${() => setHoverSpan(i)}
+                onPointerLeave=${() => setHoverSpan(null)}
+                onFocusIn=${() => setHoverSpan(i)}
+                onFocusOut=${() => setHoverSpan(null)}>
                 <button class="wall-span-delete" type="button"
-                  aria-label=${`Remove ${Math.round(s.end - s.start)} inch usable span`}
+                  aria-label=${`Delete ${Math.round(s.end - s.start)} inch usable span`}
                   onPointerDown=${(e) => { e.preventDefault(); e.stopPropagation(); }}
                   onClick=${(e) => { e.stopPropagation(); removeSpan(i); }}>
                   X
@@ -436,12 +443,12 @@ export function WallSpecEditor({ wall, projectId, placeArtId, onChange }) {
           `)}
           <svg class="wall-ruler" style=${rulerTrackWidth ? `left:${rulerLeft}px;width:${rulerTrackWidth}px` : ""}
             viewBox=${`0 0 ${L} ${rulerH}`} preserveAspectRatio="none" aria-label="Wall ruler">
-            <line class="ev-ruleline" x1="0" y1="1" x2=${L} y2="1" />
+            <line class="ev-ruleline" x1="0" y1="0.5" x2=${L} y2="0.5" />
             ${ticks.map((t, i) => {
               const isLast = i === ticks.length - 1;
               return html`
               <g key=${i}>
-                <line class="ev-tick" x1=${t} y1="1" x2=${t} y2=${rulerTickLen + 1} />
+                <line class="ev-tick" x1=${t} y1="0.5" x2=${t} y2=${rulerTickLen + 0.5} />
               </g>`;
             })}
           </svg>
@@ -491,11 +498,20 @@ export function WallSpecEditor({ wall, projectId, placeArtId, onChange }) {
         </div>
         <div class="eyebrow" style="margin-top:24px;margin-bottom:12px">Usable spans</div>
         ${segments.length === 0 && html`<p class="swatch-no">None yet — drag on the wall.</p>`}
-        ${segments.map((s, i) => html`
-          <div class="roomrow" key=${i}>
-            <span class="grow mono">${Math.round(s.start)}″ – ${Math.round(s.end)}″ <span class="muted">· ${Math.round(s.end - s.start)}″</span></span>
-            <button class="linkbtn muted" onClick=${() => removeSpan(i)}>Remove</button>
-          </div>`)}
+        ${segments.length > 0 && html`
+          <div class="wall-span-list">
+            ${segments.map((s, i) => html`
+              <div class=${"roomrow wall-span-row" + (hoverSpan === i ? " is-hover" : "")} key=${i}
+                onMouseEnter=${() => setHoverSpan(i)}
+                onMouseLeave=${() => setHoverSpan(null)}
+                onPointerEnter=${() => setHoverSpan(i)}
+                onPointerLeave=${() => setHoverSpan(null)}
+                onFocusIn=${() => setHoverSpan(i)}
+                onFocusOut=${() => setHoverSpan(null)}>
+                <span class="grow mono">${Math.round(s.start)}″ – ${Math.round(s.end)}″ <span class="muted">· ${Math.round(s.end - s.start)}″</span></span>
+                <button class="linkbtn muted" onClick=${() => removeSpan(i)}>Delete</button>
+              </div>`)}
+          </div>`}
         <p class="count" style="margin-top:18px">${Math.round(usableTotal)}″ usable of ${Math.round(L)}″</p>
       </aside>`;
   }

@@ -28,6 +28,7 @@ function TopBar() {
           <span class="studio-logo"><span>Gaile</span><span>Guevara</span><span>Studio</span></span>
         </a>
         <div class="crumb-stack">
+          ${projectMatch && html`<${ProjectNav} projectId=${projectMatch.id} active=${active} className="header-subnav" />`}
           <nav class="crumbs">
             ${items.map((c, i) => html`
               <span class="crumb-item" key=${i}>
@@ -37,7 +38,6 @@ function TopBar() {
                   : html`<span class="crumb-current">${c.label}</span>`}
               </span>`)}
           </nav>
-          ${projectMatch && html`<${ProjectNav} projectId=${projectMatch.id} active=${active} className="header-subnav" />`}
         </div>
         <nav class="navlinks">
           <a href="/" data-link class=${pathname === "/" ? "is-active" : ""}>Projects</a>
