@@ -1,0 +1,13 @@
+# Dependencies
+node_modules/
+
+# Cloudflare Wrangler local state (D1/R2/KV simulators, build cache)
+.wrangler/
+
+# Local test images / source assets (not part of the app)
+images/
+
+# OS / editor cruft
+.DS_Store
+**/.DS_Store
+*.log

@@ -1,0 +1,26 @@
+name = "artset"
+main = "worker/src/index.js"
+compatibility_date = "2025-01-15"
+compatibility_flags = ["nodejs_compat"]
+
+# Static SPA served from ./app. The Worker runs first only for API paths;
+# everything else serves a static asset, falling back to index.html (SPA routing).
+[assets]
+directory = "./app"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+run_worker_first = ["/api/*"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "artset-db"
+database_id = "c172f7ca-a952-4ec2-b82a-3ea56a9b3e9e"
+migrations_dir = "worker/migrations"
+
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "artset-images"
+
+[[kv_namespaces]]
+binding = "KV"
+id = "fc4aa831733041c7923b2f37d17fe458"

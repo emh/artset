@@ -1,0 +1,20 @@
+{
+  "name": "artset",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Artset — art placement specification tool for interior design studios",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "migrate:local": "wrangler d1 migrations apply artset-db --local",
+    "migrate:remote": "wrangler d1 migrations apply artset-db --remote"
+  },
+  "devDependencies": {
+    "wrangler": "^4.105.0"
+  },
+  "dependencies": {
+    "preact": "^10.24.3",
+    "@preact/signals": "^2.0.1",
+    "htm": "^3.1.1"
+  }
+}
