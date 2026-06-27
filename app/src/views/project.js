@@ -4,7 +4,6 @@ import { api } from "../api.js";
 import { crumbs } from "../store.js";
 import { PlanUploader } from "../components/plan-uploader.js";
 import { RoomEditor } from "../components/room-editor.js";
-import { ProjectNav } from "../components/project-nav.js";
 
 export function ProjectView({ id }) {
   const [project, setProject] = useState(null);
@@ -34,9 +33,7 @@ export function ProjectView({ id }) {
   return html`
     <main>
       <div class="wrap">
-        <${ProjectNav} projectId=${id} projectName=${project.name} active="plan" />
-        <hr class="rule" />
-        <div class="mt-lg">
+        <div>
           ${showUploader && html`
             <div style="max-width:620px">
               <div class="eyebrow" style="margin-bottom:16px">${floorplan ? "Replace floor plan" : "Upload floor plan"}</div>
@@ -45,7 +42,7 @@ export function ProjectView({ id }) {
             </div>
           `}
           ${!showUploader && html`
-            <${RoomEditor} projectId=${id} floorplan=${floorplan} onReplacePlan=${() => setReplacing(true)} />
+            <${RoomEditor} projectId=${id} floorplan=${floorplan} onDeletePlan=${() => { setFloorplan(null); setReplacing(false); }} />
           `}
         </div>
       </div>

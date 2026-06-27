@@ -7,7 +7,7 @@ function normalize(a, b) {
   return { x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), w: Math.abs(b.x - a.x), h: Math.abs(b.y - a.y) };
 }
 
-export function RoomEditor({ projectId, floorplan, onReplacePlan }) {
+export function RoomEditor({ projectId, floorplan, onDeletePlan }) {
   const W = floorplan.width_px, H = floorplan.height_px;
   const fs = Math.max(10, Math.round(W * 0.013)); // label size in image units
   const [rooms, setRooms] = useState(null);
@@ -15,6 +15,8 @@ export function RoomEditor({ projectId, floorplan, onReplacePlan }) {
   const [pending, setPending] = useState(null);  // finalized rect awaiting a name
   const [nameVal, setNameVal] = useState("");
   const [hoverId, setHoverId] = useState(null);
+  const [dialog, setDialog] = useState(null);
+  const [dialogBusy, setDialogBusy] = useState(false);
   const svgRef = useRef(null);
   const startRef = useRef(null);
   const draggingRef = useRef(false);
@@ -68,16 +70,29 @@ export function RoomEditor({ projectId, floorplan, onReplacePlan }) {
   }
   function cancelPending() { setPending(null); setNameVal(""); }
 
-  async function removeRoom(id) {
-    if (!confirm("Delete this room?")) return;
-    await api.del(`/api/rooms/${id}`);
-    setRooms((rs) => rs.filter((r) => r.id !== id));
+  function closeDialog() {
+    if (dialogBusy) return;
+    setDialog(null);
   }
-  async function renameRoom(r) {
-    const next = prompt("Rename room", r.name);
-    if (next == null || !next.trim() || next.trim() === r.name) return;
-    await api.patch(`/api/rooms/${r.id}`, { name: next.trim() });
-    setRooms((rs) => rs.map((x) => (x.id === r.id ? { ...x, name: next.trim() } : x)));
+
+  async function confirmDelete() {
+    if (!dialog || dialog.type !== "delete") return;
+    setDialogBusy(true);
+    try {
+      await api.del(`/api/rooms/${dialog.room.id}`);
+      setRooms((rs) => rs.filter((r) => r.id !== dialog.room.id));
+      setDialog(null);
+    } finally { setDialogBusy(false); }
+  }
+
+  async function confirmDeletePlan() {
+    if (!dialog || dialog.type !== "delete-plan") return;
+    setDialogBusy(true);
+    try {
+      await api.del(`/api/projects/${projectId}/floorplan`);
+      setDialog(null);
+      if (onDeletePlan) onDeletePlan();
+    } finally { setDialogBusy(false); }
   }
 
   // popover position in display px
@@ -114,7 +129,7 @@ export function RoomEditor({ projectId, floorplan, onReplacePlan }) {
             </div>
           `}
         </div>
-        <p class="mono muted" style="margin-top:12px">${W} × ${H} px · <button class="linkbtn muted" onClick=${onReplacePlan}>Replace plan</button></p>
+        <p style="margin-top:12px"><button class="linkbtn muted" onClick=${() => setDialog({ type: "delete-plan" })}>Delete plan</button></p>
       </div>
 
       <aside class="sidebar">
@@ -122,17 +137,48 @@ export function RoomEditor({ projectId, floorplan, onReplacePlan }) {
         <p class="muted" style="font-size:13px;margin-top:-8px;margin-bottom:18px">Drag a rectangle around each room, then name it.</p>
         ${rooms === null && html`<p class="spinner">Loading…</p>`}
         ${rooms && rooms.length === 0 && html`<p class="swatch-no">No rooms yet.</p>`}
-        ${rooms && rooms.map((r) => html`
-          <div class=${"roomrow" + (hoverId === r.id ? " is-hover" : "")} key=${r.id}
-            onMouseEnter=${() => setHoverId(r.id)} onMouseLeave=${() => setHoverId(null)}>
-            <span class="grow rname" style="cursor:pointer" onClick=${() => navigate(`/projects/${projectId}/rooms/${r.id}`)}>${r.name}</span>
-            <button class="linkbtn muted" onClick=${() => renameRoom(r)}>Rename</button>
-            <button class="linkbtn muted" onClick=${() => removeRoom(r.id)}>Delete</button>
-            <button class="linkbtn" onClick=${() => navigate(`/projects/${projectId}/rooms/${r.id}`)}>Walls →</button>
+        ${rooms && rooms.length > 0 && html`
+          <div class="room-list">
+            ${rooms.map((r) => html`
+              <div class=${"roomrow plan-room-row" + (hoverId === r.id ? " is-hover" : "")} key=${r.id}
+                onMouseEnter=${() => setHoverId(r.id)} onMouseLeave=${() => setHoverId(null)}
+                onClick=${() => navigate(`/projects/${projectId}/rooms/${r.id}`)}>
+                <span class="grow rname">${r.name}</span>
+                <button class="linkbtn muted" onClick=${(e) => { e.stopPropagation(); setDialog({ type: "delete", room: r }); }}>Delete</button>
+              </div>
+            `)}
           </div>
-        `)}
-        ${rooms && rooms.length > 0 && html`<p class="count" style="margin-top:18px">${rooms.length} room${rooms.length === 1 ? "" : "s"}</p>`}
+        `}
       </aside>
+
+      ${dialog && html`
+        <div class="modal-backdrop" role="presentation" onClick=${closeDialog}>
+          <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="room-dialog-title" onClick=${(e) => e.stopPropagation()}>
+            ${dialog.type === "delete" && html`
+              <div>
+                <div class="eyebrow">Room</div>
+                <h2 id="room-dialog-title">Delete room</h2>
+                <p class="modal-copy">Delete “${dialog.room.name}”? This will remove its walls and any placements on those walls.</p>
+                <div class="modal-actions">
+                  <button class="btn btn--danger" type="button" disabled=${dialogBusy} onClick=${confirmDelete}>Delete</button>
+                  <button class="btn btn--ghost" type="button" disabled=${dialogBusy} onClick=${closeDialog}>Cancel</button>
+                </div>
+              </div>
+            `}
+            ${dialog.type === "delete-plan" && html`
+              <div>
+                <div class="eyebrow">Floor plan</div>
+                <h2 id="room-dialog-title">Delete plan</h2>
+                <p class="modal-copy">Delete this floor plan? This will remove the plan image, all rooms, all walls, and any placements on those walls.</p>
+                <div class="modal-actions">
+                  <button class="btn btn--danger" type="button" disabled=${dialogBusy} onClick=${confirmDeletePlan}>Delete</button>
+                  <button class="btn btn--ghost" type="button" disabled=${dialogBusy} onClick=${closeDialog}>Cancel</button>
+                </div>
+              </div>
+            `}
+          </div>
+        </div>
+      `}
     </div>
   `;
 }

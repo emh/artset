@@ -43,8 +43,12 @@ export function WallSpecEditor({ wall, projectId, placeArtId, onChange }) {
   const [inventory, setInventory] = useState([]);
   const [selPlace, setSelPlace] = useState(null);
   const [picking, setPicking] = useState(false);
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [viewport, setViewport] = useState({ w: 0, h: 0 });
 
   const svgRef = useRef(null);
+  const viewportRef = useRef(null);
   const interact = useRef(null);
   const anchorRef = useRef(0);
   const draftRef = useRef(null);
@@ -52,22 +56,75 @@ export function WallSpecEditor({ wall, projectId, placeArtId, onChange }) {
   const placeRef = useRef([]);
   const artDrag = useRef(null);
   const didAutoPlace = useRef(false);
+  const pointers = useRef(new Map());
+  const panPoint = useRef(null);
 
   const L = Number(length) || 1;
   const bandH = Number(height) || 108;
   const fontR = Math.min(Math.max(L * 0.022, bandH * 0.05), bandH * 0.14);
   const grabW = Math.max(L * 0.02, 2);
-  const rLabel = fontR * 0.85;
-  const tickLen = rLabel * 0.6;
-  const labelGap = rLabel * 0.3;
-  const rowH = rLabel * 1.2;
-  const row1Y = tickLen + labelGap;
-  const row2Y = row1Y + rowH;
-  const rulerH = row2Y + rLabel * 1.1;
-  const VBh = bandH + rulerH;
-  const topMargin = fontR * 1.7;
+  const rulerH = 24;
+  const rulerTickLen = 5;
+  const rulerLabelSize = 10;
+  const rulerLabelY = 19;
+  const canPan = zoom > 1.01;
+  const maxRendererH = Math.max(120, Math.min(640, (viewport.windowH || 720) - 330));
+  const baseScale = viewport.w ? Math.min(viewport.w / L, maxRendererH / bandH) : 0;
+  const baseWallW = L * baseScale;
+  const baseWallH = bandH * baseScale;
+  const renderedWallW = baseWallW * zoom;
+  const renderedWallH = baseWallH * zoom;
+  const rendererH = renderedWallH ? Math.min(renderedWallH, maxRendererH) : 0;
+  const maxPanX = Math.max(0, (renderedWallW - (viewport.w || 0)) / 2);
+  const maxPanY = Math.max(0, (renderedWallH - rendererH) / 2);
+  const clampPan = (next) => ({
+    x: Math.max(-maxPanX, Math.min(maxPanX, next.x)),
+    y: Math.max(-maxPanY, Math.min(maxPanY, next.y)),
+  });
+  const wallLeft = ((viewport.w || 0) - renderedWallW) / 2 + pan.x;
+  const wallTop = (rendererH - renderedWallH) / 2 + pan.y;
+  const visibleStartX = renderedWallW ? Math.max(0, -wallLeft) : 0;
+  const visibleEndX = renderedWallW ? Math.min(renderedWallW, (viewport.w || 0) - wallLeft) : 0;
+  const visibleStartY = renderedWallH ? Math.max(0, -wallTop) : 0;
+  const visibleEndY = renderedWallH ? Math.min(renderedWallH, rendererH - wallTop) : 0;
+  const visibleW = renderedWallW ? Math.min(1, Math.max(0, (visibleEndX - visibleStartX) / renderedWallW)) : 1;
+  const visibleH = renderedWallH ? Math.min(1, Math.max(0, (visibleEndY - visibleStartY) / renderedWallH)) : 1;
+  const rulerWidth = renderedWallW;
+  const wallPixelLeft = viewport.w ? (viewport.w - rulerWidth) / 2 + pan.x : 0;
+  const rulerTrackWidth = rulerWidth;
+  const rulerLeft = wallPixelLeft + 1;
+  const xToPx = (x) => Math.max(0, Math.min(viewport.w || 0, wallPixelLeft + (rulerTrackWidth * x) / L));
+  const liveMeasures = live
+    ? live.measures || [{ x: live.x, text: live.text }]
+    : [];
+  const liveSpan = live && live.span;
+  const miniRect = {
+    x: renderedWallW ? (visibleStartX / renderedWallW) * L : 0,
+    y: renderedWallH ? (visibleStartY / renderedWallH) * bandH : 0,
+    w: visibleW * L,
+    h: visibleH * bandH,
+  };
 
   function setPlace(next) { placeRef.current = next; setPlacements(next); }
+
+  useEffect(() => {
+    if (!viewportRef.current) return;
+    const el = viewportRef.current;
+    const measure = () => {
+      setViewport({ w: el.clientWidth, h: el.clientHeight, windowH: window.innerHeight });
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    window.addEventListener("resize", measure);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, []);
+  useEffect(() => {
+    setPan((p) => clampPan(p));
+  }, [zoom, viewport.w, viewport.h, viewport.windowH, L, bandH]);
 
   useEffect(() => {
     api.get(`/api/walls/${wall.id}/placements`).then((d) => setPlace(d.placements)).catch(() => {});
@@ -97,9 +154,66 @@ export function WallSpecEditor({ wall, projectId, placeArtId, onChange }) {
   function commitSegments(spans) { const m = mergeSpans(spans, L); setSegs(m); persist({ segments: m }); }
 
   const clampX = (x) => Math.max(0, Math.min(L, x));
+  function cancelActiveGesture() {
+    interact.current = null;
+    artDrag.current = null;
+    draftRef.current = null;
+    setDraft(null);
+    setLive(null);
+  }
+  function zoomBy(delta) {
+    setZoom((z) => {
+      const next = Math.max(1, Math.min(3, Math.round((z + delta) * 100) / 100));
+      if (next <= 1.01) setPan({ x: 0, y: 0 });
+      return next;
+    });
+  }
+  function panBy(dx, dy) {
+    if (!canPan) return;
+    setPan((p) => clampPan({ x: p.x + dx, y: p.y + dy }));
+  }
+  function midpoint() {
+    const pts = Array.from(pointers.current.values());
+    if (pts.length < 2) return null;
+    return {
+      x: (pts[0].x + pts[1].x) / 2,
+      y: (pts[0].y + pts[1].y) / 2,
+    };
+  }
+  function onViewportWheel(e) {
+    if (!canPan) return;
+    e.preventDefault();
+    panBy(-e.deltaX, -e.deltaY);
+  }
+  function onViewportPointerDown(e) {
+    if (e.pointerType !== "touch") return;
+    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pointers.current.size >= 2 && canPan) {
+      cancelActiveGesture();
+      panPoint.current = midpoint();
+      try { e.currentTarget.setPointerCapture(e.pointerId); } catch {}
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  }
+  function onViewportPointerMove(e) {
+    if (e.pointerType !== "touch" || !pointers.current.has(e.pointerId)) return;
+    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pointers.current.size < 2 || !canPan) return;
+    const next = midpoint();
+    if (next && panPoint.current) panBy(next.x - panPoint.current.x, next.y - panPoint.current.y);
+    panPoint.current = next;
+    e.preventDefault();
+    e.stopPropagation();
+  }
+  function onViewportPointerEnd(e) {
+    pointers.current.delete(e.pointerId);
+    panPoint.current = midpoint();
+  }
 
   // ---------- usable-space interactions (usable mode) ----------
   function onDownNew(e) {
+    if (pointers.current.size >= 2) return;
     if (mode !== "usable") return;
     e.preventDefault(); e.stopPropagation();
     try { svgRef.current.setPointerCapture(e.pointerId); } catch {}
@@ -108,9 +222,10 @@ export function WallSpecEditor({ wall, projectId, placeArtId, onChange }) {
     anchorRef.current = x;
     draftRef.current = { start: x, end: x };
     setDraft({ start: x, end: x });
-    setLive({ x, text: `${Math.round(x)}″` });
+    setLive({ measures: [{ x, text: `${Math.round(x)}″` }] });
   }
   function onDownHandle(e, index, edge) {
+    if (pointers.current.size >= 2) return;
     e.preventDefault(); e.stopPropagation();
     try { svgRef.current.setPointerCapture(e.pointerId); } catch {}
     interact.current = { type: "handle", index, edge };
@@ -119,6 +234,7 @@ export function WallSpecEditor({ wall, projectId, placeArtId, onChange }) {
   }
   // ---------- art placement interactions (place mode) ----------
   function onArtDown(e, p) {
+    if (pointers.current.size >= 2) return;
     if (mode !== "place") return;
     e.preventDefault(); e.stopPropagation();
     try { svgRef.current.setPointerCapture(e.pointerId); } catch {}
@@ -145,7 +261,13 @@ export function WallSpecEditor({ wall, projectId, placeArtId, onChange }) {
     if (it.type === "new") {
       const d = { start: Math.min(anchorRef.current, x), end: Math.max(anchorRef.current, x) };
       draftRef.current = d; setDraft(d);
-      setLive({ x: (d.start + d.end) / 2, text: `${Math.round(d.start)}″ – ${Math.round(d.end)}″` });
+      setLive({
+        measures: [
+          { x: d.start, text: `${Math.round(d.start)}″` },
+          { x: d.end, text: `${Math.round(d.end)}″` },
+        ],
+        span: d.end - d.start >= 1 ? d : null,
+      });
     } else {
       const next = segsRef.current.map((s, i) => {
         if (i !== it.index) return s;
@@ -227,58 +349,120 @@ export function WallSpecEditor({ wall, projectId, placeArtId, onChange }) {
           <button class=${"mode-tab" + (mode === "place" ? " is-active" : "")} onClick=${() => setMode("place")}>Place art</button>
         </div>
 
-        <svg ref=${svgRef} class="elevation" style="display:block;width:100%" viewBox=${`0 ${-topMargin} ${L} ${VBh + topMargin}`}
-          preserveAspectRatio="xMidYMid meet" onPointerMove=${onMove} onPointerUp=${onUp}>
-          <rect class="ev-band" x="0" y="0" width=${L} height=${bandH} onPointerDown=${mode === "usable" ? onDownNew : undefined} />
-          ${segments.map((s, i) => html`
-            <g key=${i}>
-              <rect class="ev-usable" x=${s.start} y="0" width=${Math.max(0, s.end - s.start)} height=${bandH}
-                onPointerDown=${mode === "usable" ? onDownNew : undefined} />
-              <text class="ev-measure" font-size=${fontR} x=${(s.start + s.end) / 2} y=${bandH / 2}>${Math.round(s.end - s.start)}″</text>
-              ${mode === "usable" && ["start", "end"].map((edge) => html`
-                <g key=${edge}>
-                  <line class="ev-handle" x1=${s[edge]} y1="0" x2=${s[edge]} y2=${bandH} />
-                  <rect class="ev-grab" x=${s[edge] - grabW / 2} y="0" width=${grabW} height=${bandH}
-                    onPointerDown=${(e) => onDownHandle(e, i, edge)} />
-                </g>
-              `)}
-              ${mode === "usable" && html`<text class="ev-del" font-size=${fontR} x=${(s.start + s.end) / 2} y=${fontR * 1.2}
-                onPointerDown=${(e) => { e.stopPropagation(); removeSpan(i); }}>✕</text>`}
-            </g>
-          `)}
-          ${draft && html`<rect class="ev-usable is-draft" x=${draft.start} y="0" width=${Math.max(0, draft.end - draft.start)} height=${bandH} />`}
+        <div class="wall-render-head">
+          <div class="zoom-controls" aria-label="Zoom controls">
+            <button class="iconbtn" type="button" title="Zoom out" aria-label="Zoom out" disabled=${zoom <= 1.01} onClick=${() => zoomBy(-0.25)}>-</button>
+            <button class="iconbtn" type="button" title="Zoom in" aria-label="Zoom in" disabled=${zoom >= 2.99} onClick=${() => zoomBy(0.25)}>+</button>
+          </div>
+        </div>
+        <div ref=${viewportRef} class=${"wall-renderer" + (canPan ? " can-pan" : "")}
+          style=${rendererH ? `height:${rendererH}px` : ""}
+          onWheel=${onViewportWheel}
+          onPointerDownCapture=${onViewportPointerDown}
+          onPointerMoveCapture=${onViewportPointerMove}
+          onPointerUpCapture=${onViewportPointerEnd}
+          onPointerCancelCapture=${onViewportPointerEnd}>
+          <svg ref=${svgRef} class="elevation wall-render-svg" style=${renderedWallW && renderedWallH ? `width:${renderedWallW}px;height:${renderedWallH}px;transform:translate(${pan.x}px, ${pan.y}px)` : ""}
+            viewBox=${`0 0 ${L} ${bandH}`}
+            preserveAspectRatio="xMidYMid meet" onPointerMove=${onMove} onPointerUp=${onUp}>
+            <rect class="ev-band" x="0" y="0" width=${L} height=${bandH} onPointerDown=${mode === "usable" ? onDownNew : undefined} />
+            ${segments.map((s, i) => html`
+              <g key=${i}>
+                <rect class="ev-usable" x=${s.start} y="0" width=${Math.max(0, s.end - s.start)} height=${bandH}
+                  onPointerDown=${mode === "usable" ? onDownNew : undefined} />
+                ${mode === "usable" && ["start", "end"].map((edge) => html`
+                  <g key=${edge}>
+                    <line class="ev-handle" x1=${s[edge]} y1="0" x2=${s[edge]} y2=${bandH} />
+                    <rect class="ev-grab" x=${s[edge] - grabW / 2} y="0" width=${grabW} height=${bandH}
+                      onPointerDown=${(e) => onDownHandle(e, i, edge)} />
+                  </g>
+                `)}
+              </g>
+            `)}
+            ${draft && html`<rect class="ev-usable is-draft" x=${draft.start} y="0" width=${Math.max(0, draft.end - draft.start)} height=${bandH} />`}
 
-          <!-- placed art -->
-          ${placements.map((p) => {
-            const ok = fitsAt(p.start_inches, p.width_inches, segments);
-            const sel = selPlace === p.id;
-            const y = artTop(p);
+            <!-- placed art -->
+            ${placements.map((p) => {
+              const ok = fitsAt(p.start_inches, p.width_inches, segments);
+              const sel = selPlace === p.id;
+              const y = artTop(p);
+              return html`
+                <g key=${p.id} class=${"ev-art" + (mode === "place" ? " is-live" : "")} onPointerDown=${(e) => onArtDown(e, p)}>
+                  ${p.has_image
+                    ? html`<image href=${`/api/art/${p.art_piece_id}/image?v=${encodeURIComponent(p.image_v || "")}`} x=${p.start_inches} y=${y} width=${p.width_inches} height=${p.height_inches} preserveAspectRatio="xMidYMid slice" />`
+                    : html`<rect x=${p.start_inches} y=${y} width=${p.width_inches} height=${p.height_inches} fill="#fff" />`}
+                  <rect class=${"ev-art-frame" + (ok ? "" : " no-fit") + (sel ? " is-sel" : "")} x=${p.start_inches} y=${y} width=${p.width_inches} height=${p.height_inches} />
+                </g>`;
+            })}
+          </svg>
+          ${mode === "usable" && segments.map((s, i) => {
+            const startPx = wallPixelLeft + (rulerTrackWidth * s.start) / L;
+            const endPx = wallPixelLeft + (rulerTrackWidth * s.end) / L;
+            const visibleStart = Math.max(0, startPx);
+            const visibleEnd = Math.min(viewport.w || 0, endPx);
+            if (visibleEnd - visibleStart < 24) return null;
+            const x = (visibleStart + visibleEnd) / 2;
             return html`
-              <g key=${p.id} class=${"ev-art" + (mode === "place" ? " is-live" : "")} onPointerDown=${(e) => onArtDown(e, p)}>
-                ${p.has_image
-                  ? html`<image href=${`/api/art/${p.art_piece_id}/image?v=${encodeURIComponent(p.image_v || "")}`} x=${p.start_inches} y=${y} width=${p.width_inches} height=${p.height_inches} preserveAspectRatio="xMidYMid slice" />`
-                  : html`<rect x=${p.start_inches} y=${y} width=${p.width_inches} height=${p.height_inches} fill="#fff" />`}
-                <rect class=${"ev-art-frame" + (ok ? "" : " no-fit") + (sel ? " is-sel" : "")} x=${p.start_inches} y=${y} width=${p.width_inches} height=${p.height_inches} />
-              </g>`;
+              <div class="wall-span-control" key=${i} style=${`left:${x}px`}>
+                <button class="wall-span-delete" type="button"
+                  aria-label=${`Remove ${Math.round(s.end - s.start)} inch usable span`}
+                  onPointerDown=${(e) => { e.preventDefault(); e.stopPropagation(); }}
+                  onClick=${(e) => { e.stopPropagation(); removeSpan(i); }}>
+                  X
+                </button>
+                <span class="wall-span-label">
+                  ${Math.round(s.end - s.start)}″
+                </span>
+              </div>`;
           })}
-
-          <line class="ev-ruleline" x1="0" y1=${bandH} x2=${L} y2=${bandH} />
+          ${mode === "usable" && liveSpan && (() => {
+            const startPx = wallPixelLeft + (rulerTrackWidth * liveSpan.start) / L;
+            const endPx = wallPixelLeft + (rulerTrackWidth * liveSpan.end) / L;
+            const visibleStart = Math.max(0, startPx);
+            const visibleEnd = Math.min(viewport.w || 0, endPx);
+            if (visibleEnd - visibleStart < 24) return null;
+            const x = (visibleStart + visibleEnd) / 2;
+            return html`
+              <span class="wall-span-label wall-span-label--live" style=${`left:${x}px`}>
+                ${Math.round(liveSpan.end - liveSpan.start)}″
+              </span>`;
+          })()}
+        </div>
+        <div class="wall-ruler-viewport">
+          ${liveMeasures.map((m, i) => html`
+            <div class="wall-live-measure" key=${i} style=${`left:${xToPx(m.x)}px`}>
+              <span>${m.text}</span>
+            </div>
+          `)}
+          <svg class="wall-ruler" style=${rulerTrackWidth ? `left:${rulerLeft}px;width:${rulerTrackWidth}px` : ""}
+            viewBox=${`0 0 ${L} ${rulerH}`} preserveAspectRatio="none" aria-label="Wall ruler">
+            <line class="ev-ruleline" x1="0" y1="1" x2=${L} y2="1" />
+            ${ticks.map((t, i) => {
+              const isLast = i === ticks.length - 1;
+              return html`
+              <g key=${i}>
+                <line class="ev-tick" x1=${t} y1="1" x2=${t} y2=${rulerTickLen + 1} />
+              </g>`;
+            })}
+          </svg>
           ${ticks.map((t, i) => {
             const isLast = i === ticks.length - 1;
-            const y = bandH + (isLast ? row2Y : row1Y);
+            const x = rulerLeft + (rulerTrackWidth * t) / L;
             return html`
-            <g key=${i}>
-              <line class="ev-tick" x1=${t} y1=${bandH} x2=${t} y2=${bandH + tickLen} />
-              <text class="ev-ticklabel" font-size=${rLabel} x=${t} y=${y}
-                text-anchor=${i === 0 ? "start" : isLast ? "end" : "middle"}>${Math.round(t)}″</text>
-            </g>`;
+              <span class=${"wall-ruler-label" + (i === 0 ? " is-start" : isLast ? " is-end" : "")}
+                style=${`left:${x}px;top:${rulerLabelY}px;font-size:${rulerLabelSize}px`}>
+                ${Math.round(t)}″
+              </span>`;
           })}
-          ${live && html`
-            <g>
-              <line class="ev-liveguide" x1=${live.x} y1=${-topMargin * 0.15} x2=${live.x} y2="0" />
-              <text class="ev-live" font-size=${fontR} x=${Math.max(fontR * 2.5, Math.min(L - fontR * 2.5, live.x))} y=${-topMargin * 0.55}>${live.text}</text>
-            </g>`}
-        </svg>
+        </div>
+        ${canPan && html`
+          <svg class="wall-minimap" viewBox=${`0 0 ${L} ${bandH}`} preserveAspectRatio="xMidYMid meet" aria-label="Wall minimap">
+            <rect class="ev-band" x="0" y="0" width=${L} height=${bandH} />
+            ${segments.map((s, i) => html`<rect key=${i} class="ev-usable" x=${s.start} y="0" width=${Math.max(0, s.end - s.start)} height=${bandH} />`)}
+            ${placements.map((p) => html`<rect key=${p.id} class="mini-art" x=${p.start_inches} y=${artTop(p)} width=${p.width_inches} height=${p.height_inches} />`)}
+            <rect class="mini-window" x=${miniRect.x} y=${miniRect.y} width=${miniRect.w} height=${miniRect.h} />
+          </svg>
+        `}
         <p class="mono muted" style="margin-top:12px">
           ${mode === "usable"
             ? html`Drag across the wall to mark usable space. Drag the edges to adjust. ${saving ? "· saving…" : ""}`

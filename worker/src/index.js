@@ -9,7 +9,7 @@ import { signup, login, logout, me } from "./routes_auth.js";
 import {
   listProjects, createProject, getProject, updateProject, deleteProject,
 } from "./routes_projects.js";
-import { uploadFloorplan, getPlanImage } from "./routes_floorplan.js";
+import { uploadFloorplan, getPlanImage, deleteFloorplan } from "./routes_floorplan.js";
 import { listRooms, createRoom, updateRoom, deleteRoom, getRoom } from "./routes_rooms.js";
 import { listWalls, createWall, getWall, updateWall, deleteWall } from "./routes_walls.js";
 import {
@@ -51,6 +51,7 @@ router.delete("/api/projects/:id", auth(deleteProject));
 
 // floor plan
 router.post("/api/projects/:id/floorplan", auth(uploadFloorplan));
+router.delete("/api/projects/:id/floorplan", auth(deleteFloorplan));
 router.get("/api/projects/:id/plan-image", auth(getPlanImage));
 
 // rooms

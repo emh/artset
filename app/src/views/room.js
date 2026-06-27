@@ -14,6 +14,7 @@ function svgPoint(svg, clientX, clientY) {
 export function RoomView({ projectId, roomId }) {
   const [floorplan, setFloorplan] = useState(null);
   const [room, setRoom] = useState(null);
+  const [roomName, setRoomName] = useState("");
   const [walls, setWalls] = useState(null);
   const [err, setErr] = useState(null);
 
@@ -23,6 +24,8 @@ export function RoomView({ projectId, roomId }) {
   const [lenVal, setLenVal] = useState("");
   const [pop, setPop] = useState(null);         // {left, top} container-relative
   const [hoverId, setHoverId] = useState(null);
+  const [dialog, setDialog] = useState(null);
+  const [dialogBusy, setDialogBusy] = useState(false);
 
   const svgRef = useRef(null);
   const wrapRef = useRef(null);
@@ -40,7 +43,7 @@ export function RoomView({ projectId, roomId }) {
     ]).then(([p, r, w]) => {
       if (!alive) return;
       if (!p.floorplan) { setErr("This project has no floor plan yet."); return; }
-      setFloorplan(p.floorplan); setRoom(r.room); setWalls(w.walls);
+      setFloorplan(p.floorplan); setRoom(r.room); setRoomName(r.room.name); setWalls(w.walls);
       crumbs.value = [
         { label: p.project.name, href: `/projects/${projectId}` },
         { label: r.room.name, href: `/projects/${projectId}/rooms/${roomId}` },
@@ -102,10 +105,29 @@ export function RoomView({ projectId, roomId }) {
   }
   function cancelPending() { setPending(null); setPop(null); setNameVal(""); setLenVal(""); }
 
-  async function removeWall(id) {
-    if (!confirm("Delete this wall?")) return;
-    await api.del(`/api/walls/${id}`);
-    setWalls((ws) => ws.filter((w) => w.id !== id));
+  async function saveRoomName() {
+    const next = roomName.trim();
+    if (!next) { setRoomName(room.name); return; }
+    if (next === room.name) return;
+    const { room: updated } = await api.patch(`/api/rooms/${roomId}`, { name: next });
+    setRoom(updated);
+    setRoomName(updated.name);
+    crumbs.value = crumbs.value.map((c, i) => (i === 1 ? { ...c, label: updated.name } : c));
+  }
+
+  function closeDialog() {
+    if (dialogBusy) return;
+    setDialog(null);
+  }
+
+  async function confirmDeleteWall() {
+    if (!dialog || dialog.type !== "delete-wall") return;
+    setDialogBusy(true);
+    try {
+      await api.del(`/api/walls/${dialog.wall.id}`);
+      setWalls((ws) => ws.filter((w) => w.id !== dialog.wall.id));
+      setDialog(null);
+    } finally { setDialogBusy(false); }
   }
 
   const stage = html`
@@ -142,24 +164,51 @@ export function RoomView({ projectId, roomId }) {
 
   const sidebar = html`
     <aside class="sidebar">
+      <div class="eyebrow">Room</div>
+      <label class="field"><span class="label">Name</span>
+        <input class="input" name="room-name" autocomplete="off" value=${roomName}
+          onInput=${(e) => setRoomName(e.target.value)} onBlur=${saveRoomName}
+          onKeyDown=${(e) => e.key === "Enter" && e.target.blur()} /></label>
       <div class="eyebrow">Walls</div>
       <p class="muted" style="font-size:13px;margin-top:-8px;margin-bottom:18px">Drag a line along each wall, then name it and enter its length.</p>
       ${walls === null && html`<p class="spinner">Loading…</p>`}
       ${walls && walls.length === 0 && html`<p class="swatch-no">No walls yet.</p>`}
-      ${walls && walls.map((w) => html`
-        <div class=${"roomrow" + (hoverId === w.id ? " is-hover" : "")} key=${w.id}
-          onMouseEnter=${() => setHoverId(w.id)} onMouseLeave=${() => setHoverId(null)}>
-          <span class="grow rname" style="cursor:pointer" onClick=${() => navigate(`/projects/${projectId}/rooms/${roomId}/walls/${w.id}`)}>
-            ${w.name} <span class="mono muted">${w.length_inches}″</span>
-          </span>
-          <button class="linkbtn muted" onClick=${() => removeWall(w.id)}>Delete</button>
-          <button class="linkbtn" onClick=${() => navigate(`/projects/${projectId}/rooms/${roomId}/walls/${w.id}`)}>Spec →</button>
+      ${walls && walls.length > 0 && html`
+        <div class="wall-list">
+          ${walls.map((w) => html`
+            <div class=${"roomrow plan-wall-row" + (hoverId === w.id ? " is-hover" : "")} key=${w.id}
+              onMouseEnter=${() => setHoverId(w.id)} onMouseLeave=${() => setHoverId(null)}
+              onClick=${() => navigate(`/projects/${projectId}/rooms/${roomId}/walls/${w.id}`)}>
+              <span class="grow rname">
+                ${w.name} <span class="mono muted">${w.length_inches}″</span>
+              </span>
+              <button class="linkbtn muted" onClick=${(e) => { e.stopPropagation(); setDialog({ type: "delete-wall", wall: w }); }}>Delete</button>
+            </div>
+          `)}
         </div>
-      `)}
-      ${walls && walls.length > 0 && html`<p class="count" style="margin-top:18px">${walls.length} wall${walls.length === 1 ? "" : "s"}</p>`}
+      `}
     </aside>`;
 
-  return shell(projectId, room.name, html`<div class="workspace">${stage}${sidebar}</div>`);
+  return shell(projectId, room.name, html`
+    <div class="workspace">
+      ${stage}
+      ${sidebar}
+
+      ${dialog && html`
+        <div class="modal-backdrop" role="presentation" onClick=${closeDialog}>
+          <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="wall-dialog-title" onClick=${(e) => e.stopPropagation()}>
+            <div class="eyebrow">Wall</div>
+            <h2 id="wall-dialog-title">Delete wall</h2>
+            <p class="modal-copy">Delete “${dialog.wall.name}”? This will remove its usable spans and any art placements on this wall.</p>
+            <div class="modal-actions">
+              <button class="btn btn--danger" type="button" disabled=${dialogBusy} onClick=${confirmDeleteWall}>Delete</button>
+              <button class="btn btn--ghost" type="button" disabled=${dialogBusy} onClick=${closeDialog}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      `}
+    </div>
+  `);
 }
 
 // snap a drawn line to horizontal/vertical when nearly axis-aligned

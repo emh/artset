@@ -55,3 +55,28 @@ export async function getPlanImage({ env, session, params }) {
     },
   });
 }
+
+// DELETE /api/projects/:id/floorplan
+// Removes the uploaded plan and all plan-derived room/wall/placement data.
+export async function deleteFloorplan({ env, session, params }) {
+  const project = await loadProject(env, session, params.id);
+  if (!project) return error(404, "Project not found");
+
+  const fp = await env.DB.prepare("SELECT id, image_key FROM floorplans WHERE project_id = ?")
+    .bind(project.id).first();
+  if (fp) await env.BUCKET.delete(fp.image_key).catch(() => {});
+
+  await env.DB.batch([
+    env.DB.prepare(
+      `DELETE FROM placements
+        WHERE wall_id IN (
+          SELECT w.id FROM walls w JOIN rooms r ON r.id = w.room_id WHERE r.project_id = ?
+        )`
+    ).bind(project.id),
+    env.DB.prepare("DELETE FROM walls WHERE room_id IN (SELECT id FROM rooms WHERE project_id = ?)").bind(project.id),
+    env.DB.prepare("DELETE FROM rooms WHERE project_id = ?").bind(project.id),
+    env.DB.prepare("DELETE FROM floorplans WHERE project_id = ?").bind(project.id),
+  ]);
+
+  return json({ ok: true });
+}

@@ -1,7 +1,6 @@
 import { html } from "htm/preact";
 import { useState, useEffect, useRef } from "preact/hooks";
 import { api } from "../api.js";
-import { ProjectNav } from "../components/project-nav.js";
 import { navigate } from "../router.js";
 import { crumbs } from "../store.js";
 
@@ -107,9 +106,7 @@ export function ArtView({ projectId }) {
   return html`
     <main>
       <div class="wrap">
-        <${ProjectNav} projectId=${projectId} projectName=${project && project.name} active="art" />
-        <hr class="rule" />
-        <div class="mt-lg">
+        <div>
           <div class="flex between items-center" style="margin-bottom:28px">
             <div class="eyebrow">Art inventory</div>
             ${!open && html`<button class="btn" onClick=${openAdd}>Add art</button>`}

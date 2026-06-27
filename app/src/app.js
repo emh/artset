@@ -9,9 +9,17 @@ import { RoomView } from "./views/room.js";
 import { WallView } from "./views/wall.js";
 import { ArtView } from "./views/art.js";
 import { ReviewView } from "./views/review.js";
+import { ProjectNav } from "./components/project-nav.js";
 
 function TopBar() {
   const items = crumbs.value;
+  const pathname = currentPathname();
+  const projectMatch = matchRoute("/projects/:id", pathname)
+    || matchRoute("/projects/:id/art", pathname)
+    || matchRoute("/projects/:id/review", pathname)
+    || matchRoute("/projects/:id/rooms/:roomId", pathname)
+    || matchRoute("/projects/:id/rooms/:roomId/walls/:wallId", pathname);
+  const active = pathname.endsWith("/art") ? "art" : pathname.endsWith("/review") ? "review" : "plan";
   return html`
     <header class="topbar">
       <div class="wrap topbar-inner">
@@ -19,17 +27,20 @@ function TopBar() {
           <span class="brandline"><span class="brand">Artset</span><span class="credit-by">by</span></span>
           <span class="studio-logo"><span>Gaile</span><span>Guevara</span><span>Studio</span></span>
         </a>
-        <nav class="crumbs">
-          ${items.map((c, i) => html`
-            <span class="crumb-item" key=${i}>
-              ${i > 0 && html`<span class="crumb-sep">|</span>`}
-              ${c.href && i < items.length - 1
-                ? html`<a class="crumb-link" href=${c.href} data-link>${c.label}</a>`
-                : html`<span class="crumb-current">${c.label}</span>`}
-            </span>`)}
-        </nav>
+        <div class="crumb-stack">
+          <nav class="crumbs">
+            ${items.map((c, i) => html`
+              <span class="crumb-item" key=${i}>
+                ${i > 0 && html`<span class="crumb-sep">|</span>`}
+                ${c.href && i < items.length - 1
+                  ? html`<a class="crumb-link" href=${c.href} data-link>${c.label}</a>`
+                  : html`<span class="crumb-current">${c.label}</span>`}
+              </span>`)}
+          </nav>
+          ${projectMatch && html`<${ProjectNav} projectId=${projectMatch.id} active=${active} className="header-subnav" />`}
+        </div>
         <nav class="navlinks">
-          <a href="/" data-link class=${currentPathname() === "/" ? "is-active" : ""}>Projects</a>
+          <a href="/" data-link class=${pathname === "/" ? "is-active" : ""}>Projects</a>
           <button class="linkbtn muted" onClick=${async () => { await logout(); navigate("/"); }}>Sign out</button>
         </nav>
       </div>

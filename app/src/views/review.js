@@ -1,7 +1,6 @@
 import { html } from "htm/preact";
 import { useState, useEffect } from "preact/hooks";
 import { api } from "../api.js";
-import { ProjectNav } from "../components/project-nav.js";
 import { ReviewElevation } from "../components/review-elevation.js";
 import { crumbs } from "../store.js";
 
@@ -46,19 +45,17 @@ export function ReviewView({ projectId, token }) {
   const W = floorplan && floorplan.width_px, H = floorplan && floorplan.height_px;
   const fs = floorplan ? Math.max(10, W * 0.013) : 0;
 
-  const head = isPublic
-    ? html`<div class="page-head">
+  const head = isPublic && html`<div class="page-head">
         <div class="eyebrow">${studio.name}</div>
         <h1 class="display" style="font-size:40px;margin-top:12px">${project.name}</h1>
         <p class="muted" style="margin-top:8px">Art placement specification</p>
-      </div>`
-    : html`<${ProjectNav} projectId=${projectId} projectName=${project.name} active="review" />`;
+      </div>`;
 
   return html`
     <main>
       <div class="wrap">
         ${head}
-        <hr class="rule" />
+        ${isPublic && html`<hr class="rule" />`}
 
         ${!isPublic && html`
           <div class="share-bar">
