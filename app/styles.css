@@ -75,7 +75,7 @@ h1, h2, h3, h4 { font-family: var(--font-display); font-weight: 400; margin: 0; 
 .muted { color: var(--muted); }
 
 /* ---- layout ---- */
-.wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 var(--gut); }
+.wrap { max-width: var(--maxw); margin: 0 auto; padding: 0; }
 .stack > * + * { margin-top: 14px; }
 .rule { border: 0; border-top: 1px solid var(--line); margin: 0; }
 
@@ -154,6 +154,8 @@ main { padding: 56px 0 120px; }
 .btn:hover { background: var(--paper); color: var(--ink); }
 .btn--ghost { background: transparent; color: var(--ink); }
 .btn--ghost:hover { background: var(--ink); color: var(--paper); }
+.btn--danger { background: var(--warn); border-color: var(--warn); }
+.btn--danger:hover { background: var(--paper); color: var(--warn); }
 .btn:disabled { opacity: .4; cursor: not-allowed; }
 .linkbtn {
   font-family: var(--font-display); text-transform: uppercase;
@@ -186,9 +188,29 @@ main { padding: 56px 0 120px; }
 .row:hover { background: var(--paper-2); }
 .row .grow { flex: 1; min-width: 0; }
 .row h3 { font-size: 18px; }
+.project-row { padding-left: 24px; padding-right: 24px; }
 
 /* ---- cards (used sparingly) ---- */
 .card { border: 1px solid var(--line); padding: 28px; background: var(--paper); }
+
+/* ---- modal dialogs ---- */
+.modal-backdrop {
+  position: fixed; inset: 0; z-index: 60;
+  display: flex; align-items: center; justify-content: center;
+  padding: 32px; background: rgba(255,255,255,0.72);
+  backdrop-filter: blur(6px);
+}
+.modal-panel {
+  width: min(480px, 100%);
+  background: var(--paper); border: 1px solid var(--ink);
+  padding: 32px; box-shadow: 0 24px 70px rgba(0,0,0,0.12);
+}
+.modal-panel h2 {
+  margin-top: 8px; font-size: 26px; line-height: 1.15;
+  letter-spacing: var(--track-tight); text-transform: uppercase;
+}
+.modal-copy { margin: 22px 0 0; color: var(--ink-2); }
+.modal-actions { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 28px; }
 
 /* ---- centered auth panel ---- */
 .center-pane {

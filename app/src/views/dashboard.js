@@ -9,11 +9,19 @@ function fmtDate(ms) {
   catch { return ""; }
 }
 
+function countLabel(n, singular, plural = `${singular}s`) {
+  const value = Number(n) || 0;
+  return `${value} ${value === 1 ? singular : plural}`;
+}
+
 export function Dashboard() {
   const [projects, setProjects] = useState(null);
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
+  const [dialog, setDialog] = useState(null);
+  const [renameName, setRenameName] = useState("");
+  const [dialogBusy, setDialogBusy] = useState(false);
 
   async function refresh() {
     const { projects } = await api.get("/api/projects");
@@ -31,24 +39,46 @@ export function Dashboard() {
     } finally { setBusy(false); }
   }
 
-  async function rename(p) {
-    const next = prompt("Rename project", p.name);
-    if (next == null || !next.trim() || next.trim() === p.name) return;
-    await api.patch(`/api/projects/${p.id}`, { name: next.trim() });
-    refresh();
+  function openRename(p) {
+    setRenameName(p.name);
+    setDialog({ type: "rename", project: p });
   }
 
-  async function remove(p) {
-    if (!confirm(`Delete “${p.name}”? This cannot be undone.`)) return;
-    await api.del(`/api/projects/${p.id}`);
-    refresh();
+  function closeDialog() {
+    if (dialogBusy) return;
+    setDialog(null);
+    setRenameName("");
+  }
+
+  async function submitRename(e) {
+    e.preventDefault();
+    if (!dialog || dialog.type !== "rename") return;
+    const next = renameName.trim();
+    if (!next || next === dialog.project.name) return closeDialog();
+    setDialogBusy(true);
+    try {
+      await api.patch(`/api/projects/${dialog.project.id}`, { name: next });
+      await refresh();
+      setDialog(null);
+      setRenameName("");
+    } finally { setDialogBusy(false); }
+  }
+
+  async function confirmDelete() {
+    if (!dialog || dialog.type !== "delete") return;
+    setDialogBusy(true);
+    try {
+      await api.del(`/api/projects/${dialog.project.id}`);
+      await refresh();
+      setDialog(null);
+      setRenameName("");
+    } finally { setDialogBusy(false); }
   }
 
   return html`
     <main>
       <div class="wrap">
-        <div class="page-head flex between items-center">
-          <h1 class="display" style="font-size:40px">Projects</h1>
+        <div class="page-head flex items-center" style="justify-content:flex-end">
           ${!creating && html`<button class="btn" onClick=${() => setCreating(true)}>New project</button>`}
         </div>
 
@@ -76,19 +106,56 @@ export function Dashboard() {
         ${projects && projects.length > 0 && html`
           <div class="rows">
             ${projects.map((p) => html`
-              <div class="row" key=${p.id}>
+              <div class="row project-row" key=${p.id}>
                 <div class="grow" style="cursor:pointer" onClick=${() => navigate(`/projects/${p.id}`)}>
                   <h3>${p.name}</h3>
-                  <span class="mono muted">updated ${fmtDate(p.updated_at)}</span>
+                  <span class="mono muted">
+                    ${countLabel(p.room_count, "room")} ·
+                    ${countLabel(p.wall_count, "wall")} ·
+                    ${countLabel(p.art_count, "art piece")} ·
+                    updated ${fmtDate(p.updated_at)}
+                  </span>
                 </div>
-                <button class="linkbtn muted" onClick=${() => rename(p)}>Rename</button>
-                <button class="linkbtn muted" onClick=${() => remove(p)}>Delete</button>
+                <button class="linkbtn muted" onClick=${() => openRename(p)}>Rename</button>
+                <button class="linkbtn muted" onClick=${() => setDialog({ type: "delete", project: p })}>Delete</button>
                 <button class="linkbtn" onClick=${() => navigate(`/projects/${p.id}`)}>Open</button>
               </div>
             `)}
           </div>
         `}
       </div>
+
+      ${dialog && html`
+        <div class="modal-backdrop" role="presentation" onClick=${closeDialog}>
+          <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="project-dialog-title" onClick=${(e) => e.stopPropagation()}>
+            ${dialog.type === "rename" && html`
+              <form onSubmit=${submitRename}>
+                <div class="eyebrow">Project</div>
+                <h2 id="project-dialog-title">Rename project</h2>
+                <label class="field" style="margin-top:24px">
+                  <span class="label">Project name</span>
+                  <input class="input" name="rename-project" autocomplete="off" autofocus value=${renameName} onInput=${(e) => setRenameName(e.target.value)} />
+                </label>
+                <div class="modal-actions">
+                  <button class="btn" type="submit" disabled=${dialogBusy || !renameName.trim()}>Save</button>
+                  <button class="btn btn--ghost" type="button" disabled=${dialogBusy} onClick=${closeDialog}>Cancel</button>
+                </div>
+              </form>
+            `}
+            ${dialog.type === "delete" && html`
+              <div>
+                <div class="eyebrow">Project</div>
+                <h2 id="project-dialog-title">Delete project</h2>
+                <p class="modal-copy">Delete “${dialog.project.name}”? This will remove its floor plan, rooms, walls, art, placements, and share link.</p>
+                <div class="modal-actions">
+                  <button class="btn btn--danger" type="button" disabled=${dialogBusy} onClick=${confirmDelete}>Delete</button>
+                  <button class="btn btn--ghost" type="button" disabled=${dialogBusy} onClick=${closeDialog}>Cancel</button>
+                </div>
+              </div>
+            `}
+          </div>
+        </div>
+      `}
     </main>
   `;
 }

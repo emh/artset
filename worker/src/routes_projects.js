@@ -5,7 +5,13 @@ const id = (prefix) => `${prefix}_${randomId(12)}`;
 // GET /api/projects  -> studio's projects
 export async function listProjects({ env, session }) {
   const { results } = await env.DB.prepare(
-    "SELECT id, name, status, created_at, updated_at FROM projects WHERE studio_id = ? ORDER BY updated_at DESC"
+    `SELECT p.id, p.name, p.status, p.created_at, p.updated_at,
+            (SELECT COUNT(*) FROM rooms r WHERE r.project_id = p.id) AS room_count,
+            (SELECT COUNT(*) FROM walls w JOIN rooms r ON r.id = w.room_id WHERE r.project_id = p.id) AS wall_count,
+            (SELECT COUNT(*) FROM art_pieces a WHERE a.project_id = p.id) AS art_count
+       FROM projects p
+      WHERE p.studio_id = ?
+      ORDER BY p.updated_at DESC`
   ).bind(session.studioId).all();
   return json({ projects: results });
 }
