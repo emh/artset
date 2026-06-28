@@ -75,6 +75,17 @@ export function RoomEditor({ projectId, floorplan, onDeletePlan }) {
     setDialog(null);
   }
 
+  useEffect(() => {
+    if (!dialog) return;
+    const onKeyDown = (e) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      closeDialog();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [dialog, dialogBusy]);
+
   async function confirmDelete() {
     if (!dialog || dialog.type !== "delete") return;
     setDialogBusy(true);

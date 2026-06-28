@@ -50,6 +50,17 @@ export function Dashboard() {
     setRenameName("");
   }
 
+  useEffect(() => {
+    if (!dialog) return;
+    const onKeyDown = (e) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      closeDialog();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [dialog, dialogBusy]);
+
   async function submitRename(e) {
     e.preventDefault();
     if (!dialog || dialog.type !== "rename") return;

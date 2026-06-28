@@ -54,6 +54,17 @@ export function RoomView({ projectId, roomId }) {
 
   useEffect(() => { if (pending && nameRef.current) nameRef.current.focus(); }, [pending]);
 
+  useEffect(() => {
+    if (!dialog) return;
+    const onKeyDown = (e) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      closeDialog();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [dialog, dialogBusy]);
+
   if (err) return shell(projectId, null, html`<div class="empty"><p>${err}</p></div>`);
   if (!floorplan || !room) return shell(projectId, null, html`<p class="spinner">Loading…</p>`);
 

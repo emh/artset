@@ -167,6 +167,16 @@ export function WallSpecEditor({ wall, projectId, placeArtId, onChange }) {
     const size = piece && defaultSizeForPiece(piece);
     if (piece && size) { didAutoPlace.current = true; addPlacement(piece, size); }
   }, [placeArtId, inventory]);
+  useEffect(() => {
+    if (!placementDialog) return;
+    const onKeyDown = (e) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      closePlacementDialog();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [placementDialog]);
 
   // ---------- persistence ----------
   function setSegs(next) { segsRef.current = next; setSegments(next); }
@@ -684,19 +694,21 @@ export function WallSpecEditor({ wall, projectId, placeArtId, onChange }) {
         <p class="count" style="margin-top:18px">${Math.round(usableTotal)}″ usable of ${Math.round(L)}″</p>
         <div class="eyebrow" style="margin-top:24px;margin-bottom:12px">Placed art</div>
         ${placements.length === 0 && html`<p class="swatch-no">No art placed on this wall.</p>`}
-        ${placements.map((p) => {
-          const ok = fitsAt(p.start_inches, p.width_inches, segments);
-          return html`
-          <div class=${"roomrow wall-span-row" + (selPlace === p.id ? " is-hover" : "")} key=${p.id}
-            onMouseEnter=${() => setHoverPlace(p.id)}
-            onMouseLeave=${() => setHoverPlace((current) => current === p.id ? null : current)}
-            onClick=${() => setSelPlace(p.id)}>
-            <span class="grow"><span class="rname">${p.title}</span>
-              <span class="mono muted" style="display:block;font-size:12px">${+p.width_inches}×${+p.height_inches}″ · at ${Math.round(p.start_inches)}″ · ${ok ? "fits" : "doesn’t fit"}</span></span>
-            <button class="linkbtn muted" onClick=${(e) => { e.stopPropagation(); removePlacement(p.id); }}>Delete</button>
-          </div>`;
-        })}
-        ${placements.length > 0 && html`<p class="count" style="margin-top:18px">${placements.length} placed</p>`}
+        ${placements.length > 0 && html`
+          <div class="wall-placed-list">
+            ${placements.map((p) => {
+              const ok = fitsAt(p.start_inches, p.width_inches, segments);
+              return html`
+                <div class=${"roomrow wall-span-row" + (selPlace === p.id || hoverPlace === p.id ? " is-hover" : "")} key=${p.id}
+                  onMouseEnter=${() => setHoverPlace(p.id)}
+                  onMouseLeave=${() => setHoverPlace((current) => current === p.id ? null : current)}
+                  onClick=${() => setSelPlace(p.id)}>
+                  <span class="grow"><span class="rname">${p.title}</span>
+                    <span class="mono muted" style="display:block;font-size:12px">${+p.width_inches}×${+p.height_inches}″ · at ${Math.round(p.start_inches)}″ · ${ok ? "fits" : "doesn’t fit"}</span></span>
+                  <button class="linkbtn muted" onClick=${(e) => { e.stopPropagation(); removePlacement(p.id); }}>Delete</button>
+                </div>`;
+            })}
+          </div>`}
       </aside>`;
   }
 }

@@ -73,12 +73,21 @@ export function ArtView({ projectId }) {
   const [selectedRoomId, setSelectedRoomId] = useState(null);
   const [hoverRoomId, setHoverRoomId] = useState(null);
   const [hoverWallId, setHoverWallId] = useState(null);
+  const [placementZoom, setPlacementZoom] = useState(1);
+  const [placementPan, setPlacementPan] = useState({ x: 0, y: 0 });
+  const [placementViewport, setPlacementViewport] = useState({ w: 0, h: 0 });
+  const [draftColumnId, setDraftColumnId] = useState(null);
   const fileRefs = useRef({});
   const columnInputRefs = useRef({});
+  const artSheetRef = useRef(null);
   const draftFileRef = useRef(null);
+  const placementPlanRef = useRef(null);
+  const placementPointers = useRef(new Map());
+  const placementPanPoint = useRef(null);
   const headerHoverTimer = useRef(null);
   const rowHoverTimer = useRef(null);
   const focusedColumnRef = useRef(null);
+  const canceledColumnRefs = useRef(new Set());
 
   useEffect(() => {
     api.get(`/api/projects/${projectId}`).then((d) => {
@@ -96,7 +105,35 @@ export function ArtView({ projectId }) {
     focusedColumnRef.current = editingColumn;
     input.focus();
     input.select();
-  }, [editingColumn]);
+    if (draftColumnId === editingColumn && artSheetRef.current) {
+      requestAnimationFrame(() => {
+        artSheetRef.current.scrollLeft = artSheetRef.current.scrollWidth;
+      });
+    }
+  }, [editingColumn, draftColumnId]);
+  useEffect(() => {
+    const el = placementPlanRef.current;
+    if (!el || !placementTarget || !floorplan) return;
+    const measure = () => setPlacementViewport({ w: el.clientWidth, h: el.clientHeight });
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [placementTarget, floorplan, selectedRoomId]);
+  useEffect(() => {
+    setPlacementPan((p) => clampPlacementPan(p));
+  }, [placementZoom, placementViewport.w, placementViewport.h]);
+  useEffect(() => {
+    if (!deleteTarget && !placementTarget) return;
+    const onKeyDown = (e) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      if (placementTarget) closePlacementPicker();
+      else setDeleteTarget(null);
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [deleteTarget, placementTarget]);
 
   async function refresh() {
     const { art } = await api.get(`/api/projects/${projectId}/art`);
@@ -251,17 +288,103 @@ export function ArtView({ projectId }) {
     const column = { id: `col_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`, name: "" };
     const next = [...columns, column];
     await saveColumns(next);
+    setDraftColumnId(column.id);
     setEditingColumn(column.id);
   }
 
   async function renameColumn(columnId, name) {
+    if (canceledColumnRefs.current.has(columnId)) {
+      canceledColumnRefs.current.delete(columnId);
+      return;
+    }
     await saveColumns(columns.map((c) => (c.id === columnId ? { ...c, name: String(name || "").trim() } : c)));
+    if (draftColumnId === columnId) setDraftColumnId(null);
     setEditingColumn(null);
     focusedColumnRef.current = null;
   }
 
   async function deleteColumn(columnId) {
     await saveColumns(columns.filter((c) => c.id !== columnId));
+    if (draftColumnId === columnId) setDraftColumnId(null);
+    if (editingColumn === columnId) setEditingColumn(null);
+    if (focusedColumnRef.current === columnId) focusedColumnRef.current = null;
+  }
+
+  async function cancelDraftColumn(columnId) {
+    if (draftColumnId !== columnId) return;
+    canceledColumnRefs.current.add(columnId);
+    await deleteColumn(columnId);
+  }
+
+  function clampPlacementPan(next) {
+    const maxX = Math.max(0, ((placementViewport.w || 0) * (placementZoom - 1)) / 2);
+    const maxY = Math.max(0, ((placementViewport.h || 0) * (placementZoom - 1)) / 2);
+    return {
+      x: Math.max(-maxX, Math.min(maxX, next.x)),
+      y: Math.max(-maxY, Math.min(maxY, next.y)),
+    };
+  }
+
+  function resetPlacementView() {
+    setPlacementZoom(1);
+    setPlacementPan({ x: 0, y: 0 });
+    placementPointers.current.clear();
+    placementPanPoint.current = null;
+  }
+
+  function zoomPlacementBy(delta) {
+    setPlacementZoom((z) => {
+      const next = Math.max(1, Math.min(3, Math.round((z + delta) * 100) / 100));
+      if (next <= 1.01) setPlacementPan({ x: 0, y: 0 });
+      return next;
+    });
+  }
+
+  function panPlacementBy(dx, dy) {
+    if (placementZoom <= 1.01) return;
+    setPlacementPan((p) => clampPlacementPan({ x: p.x + dx, y: p.y + dy }));
+  }
+
+  function placementMidpoint() {
+    const pts = Array.from(placementPointers.current.values());
+    if (pts.length < 2) return null;
+    return {
+      x: (pts[0].x + pts[1].x) / 2,
+      y: (pts[0].y + pts[1].y) / 2,
+    };
+  }
+
+  function onPlacementWheel(e) {
+    if (placementZoom <= 1.01) return;
+    e.preventDefault();
+    panPlacementBy(-e.deltaX, -e.deltaY);
+  }
+
+  function onPlacementPointerDown(e) {
+    if (e.pointerType !== "touch") return;
+    placementPointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (placementPointers.current.size >= 2 && placementZoom > 1.01) {
+      placementPanPoint.current = placementMidpoint();
+      try { e.currentTarget.setPointerCapture(e.pointerId); } catch {}
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  }
+
+  function onPlacementPointerMove(e) {
+    if (e.pointerType !== "touch" || !placementPointers.current.has(e.pointerId)) return;
+    placementPointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (placementPointers.current.size < 2 || placementZoom <= 1.01) return;
+    const next = placementMidpoint();
+    if (next && placementPanPoint.current) panPlacementBy(next.x - placementPanPoint.current.x, next.y - placementPanPoint.current.y);
+    placementPanPoint.current = next;
+    e.preventDefault();
+    e.stopPropagation();
+  }
+
+  function onPlacementPointerEnd(e) {
+    placementPointers.current.delete(e.pointerId);
+    placementPanPoint.current = placementMidpoint();
   }
 
   async function openPlacementPicker(p) {
@@ -269,6 +392,7 @@ export function ArtView({ projectId }) {
     setSelectedRoomId(null);
     setHoverRoomId(null);
     setHoverWallId(null);
+    resetPlacementView();
     if (rooms === null) {
       const res = await api.get(`/api/projects/${projectId}/rooms`);
       setRooms(res.rooms);
@@ -280,11 +404,13 @@ export function ArtView({ projectId }) {
     setSelectedRoomId(null);
     setHoverRoomId(null);
     setHoverWallId(null);
+    resetPlacementView();
   }
 
   async function chooseRoom(room) {
     setSelectedRoomId(room.id);
     setHoverRoomId(room.id);
+    resetPlacementView();
     if (!wallsByRoom[room.id]) {
       const res = await api.get(`/api/rooms/${room.id}/walls`);
       setWallsByRoom((prev) => ({ ...prev, [room.id]: res.walls }));
@@ -382,12 +508,14 @@ export function ArtView({ projectId }) {
   const rows = art || [];
   const columns = (project && project.metadata && project.metadata.artColumns) || [];
   const gridTemplate = `108px 320px 220px minmax(280px, 1fr) ${columns.map(() => "220px").join(" ")}`;
+  const placementCanPan = placementZoom > 1.01;
+  const placementSvgStyle = `transform:translate(${placementPan.x}px, ${placementPan.y}px) scale(${placementZoom})`;
 
   return html`
     <main>
       <div class="wrap">
         <div class="art-sheet-frame">
-          <div class="art-sheet">
+          <div class="art-sheet" ref=${artSheetRef}>
             <div class="art-sheet-head" style=${`grid-template-columns:${gridTemplate}`}
               onMouseEnter=${showHeaderControls}
               onMouseLeave=${hideHeaderControlsSoon}
@@ -408,7 +536,14 @@ export function ArtView({ projectId }) {
                       setProject((prev) => ({ ...prev, metadata: { ...((prev && prev.metadata) || {}), artColumns: next } }));
                     }}
                     onBlur=${(e) => renameColumn(column.id, e.target.value)}
-                    onKeyDown=${(e) => e.key === "Enter" && e.target.blur()} />
+                    onKeyDown=${(e) => {
+                      if (e.key === "Escape" && draftColumnId === column.id) {
+                        e.preventDefault();
+                        cancelDraftColumn(column.id);
+                        return;
+                      }
+                      if (e.key === "Enter") e.target.blur();
+                    }} />
                   <button class="art-delete-column" type="button" title="Delete column" aria-label=${column.name ? `Delete ${column.name} column` : "Delete column"}
                     onPointerDown=${(e) => { e.preventDefault(); deleteColumn(column.id); }}
                     onClick=${() => deleteColumn(column.id)}>X</button>
@@ -530,8 +665,20 @@ export function ArtView({ projectId }) {
                 const wallStroke = selectedRoom ? Math.max(4, Math.min(selectedRoom.rect_w, selectedRoom.rect_h) * 0.02) : 4;
                 const walls = selectedRoom ? (wallsByRoom[selectedRoom.id] || []) : [];
                 return html`
-                  <div class="art-placement-plan">
-                    <svg viewBox=${viewBox} preserveAspectRatio="xMidYMid meet" aria-label="Choose placement wall">
+                  <div class="art-placement-tools">
+                    <div class="zoom-controls" aria-label="Floor plan zoom controls">
+                      <button class="iconbtn" type="button" title="Zoom out" aria-label="Zoom out floor plan" disabled=${placementZoom <= 1.01} onClick=${() => zoomPlacementBy(-0.25)}>-</button>
+                      <button class="iconbtn" type="button" title="Zoom in" aria-label="Zoom in floor plan" disabled=${placementZoom >= 2.99} onClick=${() => zoomPlacementBy(0.25)}>+</button>
+                    </div>
+                  </div>
+                  <div ref=${placementPlanRef}
+                    class=${"art-placement-plan" + (placementCanPan ? " can-pan" : "")}
+                    onWheel=${onPlacementWheel}
+                    onPointerDownCapture=${onPlacementPointerDown}
+                    onPointerMoveCapture=${onPlacementPointerMove}
+                    onPointerUpCapture=${onPlacementPointerEnd}
+                    onPointerCancelCapture=${onPlacementPointerEnd}>
+                    <svg class="art-placement-svg" style=${placementSvgStyle} viewBox=${viewBox} preserveAspectRatio="xMidYMid meet" aria-label="Choose placement wall">
                       <image href=${`/api/projects/${projectId}/plan-image?v=${floorplan.id}`} x="0" y="0" width=${floorplan.width_px} height=${floorplan.height_px} preserveAspectRatio="none" />
                       ${(rooms || []).map((room) => html`
                         <g key=${room.id} class=${selectedRoomId && selectedRoomId !== room.id ? "is-muted" : ""}
@@ -559,7 +706,7 @@ export function ArtView({ projectId }) {
                   </div>
                   <div class="modal-actions">
                     ${selectedRoom
-                      ? html`<button class="btn btn--ghost" type="button" onClick=${() => { setSelectedRoomId(null); setHoverWallId(null); }}>Rooms</button>`
+                      ? html`<button class="btn btn--ghost" type="button" onClick=${() => { setSelectedRoomId(null); setHoverWallId(null); resetPlacementView(); }}>Rooms</button>`
                       : html`<button class="btn btn--ghost" type="button" onClick=${closePlacementPicker}>Cancel</button>`}
                   </div>
                 `;
