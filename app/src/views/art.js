@@ -3,6 +3,7 @@ import { useState, useEffect, useRef } from "preact/hooks";
 import { api } from "../api.js";
 import { crumbs } from "../store.js";
 import { navigate } from "../router.js";
+import { FloorplanLabel } from "../components/floorplan-label.js";
 
 const blankDraft = () => ({ titleDescription: "", dimensions: "", customValues: {}, file: null, preview: "", error: "" });
 const inch = (n) => `${Math.round(Number(n) || 0)}"`;
@@ -42,10 +43,12 @@ function placementText(p) {
 }
 
 function selectedSizeIndex(p) {
+  const sizes = p.sizes || [];
+  if (sizes.length === 1) return 0;
   const fromMeta = Number(p.metadata && p.metadata.selectedSizeIndex);
-  if (Number.isInteger(fromMeta) && fromMeta >= 0 && fromMeta < (p.sizes || []).length) return fromMeta;
+  if (Number.isInteger(fromMeta) && fromMeta >= 0 && fromMeta < sizes.length) return fromMeta;
   if (p.placed) {
-    const placed = (p.sizes || []).findIndex((s) => s.width_inches === p.placed.width_inches && s.height_inches === p.placed.height_inches);
+    const placed = sizes.findIndex((s) => s.width_inches === p.placed.width_inches && s.height_inches === p.placed.height_inches);
     if (placed >= 0) return placed;
   }
   return -1;
@@ -687,7 +690,7 @@ export function ArtView({ projectId }) {
                           onClick=${() => chooseRoom(room)}>
                           <rect class=${"room-rect art-placement-room" + (hoverRoomId === room.id || selectedRoomId === room.id ? " is-hover" : "")}
                             x=${room.rect_x} y=${room.rect_y} width=${room.rect_w} height=${room.rect_h} />
-                          ${!selectedRoom && html`<text class="room-label" font-size=${Math.max(10, floorplan.width_px * 0.013)} x=${room.rect_x + floorplan.width_px * 0.006} y=${room.rect_y + floorplan.width_px * 0.02}>${room.name.toUpperCase()}</text>`}
+                          ${!selectedRoom && html`<${FloorplanLabel} text=${room.name} fontSize=${Math.max(10, floorplan.width_px * 0.013)} x=${room.rect_x + floorplan.width_px * 0.006} y=${room.rect_y + floorplan.width_px * 0.02} />`}
                         </g>
                       `)}
                       ${selectedRoom && walls.map((wall) => html`

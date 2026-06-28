@@ -2,6 +2,7 @@ import { html } from "htm/preact";
 import { useState, useRef, useEffect } from "preact/hooks";
 import { api } from "../api.js";
 import { navigate } from "../router.js";
+import { FloorplanLabel } from "./floorplan-label.js";
 
 function normalize(a, b) {
   return { x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), w: Math.abs(b.x - a.x), h: Math.abs(b.y - a.y) };
@@ -124,7 +125,7 @@ export function RoomEditor({ projectId, floorplan, onDeletePlan }) {
               <g key=${r.id} onMouseEnter=${() => setHoverId(r.id)} onMouseLeave=${() => setHoverId(null)}>
                 <rect class=${"room-rect" + (hoverId === r.id ? " is-hover" : "")}
                   x=${r.rect_x} y=${r.rect_y} width=${r.rect_w} height=${r.rect_h} />
-                <text class="room-label" font-size=${fs} x=${r.rect_x + fs * 0.5} y=${r.rect_y + fs * 1.5}>${r.name.toUpperCase()}</text>
+                <${FloorplanLabel} text=${r.name} fontSize=${fs} x=${r.rect_x + fs * 0.5} y=${r.rect_y + fs * 1.5} />
               </g>
             `)}
             ${draft && html`<rect class="room-draft" x=${draft.x} y=${draft.y} width=${draft.w} height=${draft.h} />`}
