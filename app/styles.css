@@ -196,6 +196,13 @@ main { padding: 56px 0 120px; }
 .row .grow { flex: 1; min-width: 0; }
 .row h3 { font-size: 18px; }
 .project-row { padding-left: 24px; padding-right: 24px; }
+.project-stats {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 8px;
+}
+.project-stats .stat-sep { color: var(--muted-2); }
 
 /* ---- cards (used sparingly) ---- */
 .card { border: 1px solid var(--line); padding: 28px; background: var(--paper); }

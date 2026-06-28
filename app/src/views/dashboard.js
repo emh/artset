@@ -4,6 +4,13 @@ import { api } from "../api.js";
 import { crumbs } from "../store.js";
 import { navigate } from "../router.js";
 
+const projectStats = (p) => [
+  countLabel(p.plan_count, "plan"),
+  countLabel(p.room_count, "room"),
+  countLabel(p.wall_count, "wall"),
+  countLabel(p.art_count, "art piece"),
+];
+
 function fmtDate(ms) {
   try { return new Date(ms).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }); }
   catch { return ""; }
@@ -120,11 +127,13 @@ export function Dashboard() {
               <div class="row project-row" key=${p.id}>
                 <div class="grow" style="cursor:pointer" onClick=${() => navigate(`/projects/${p.id}`)}>
                   <h3>${p.name}</h3>
-                  <span class="mono muted">
-                    ${countLabel(p.room_count, "room")} ·
-                    ${countLabel(p.wall_count, "wall")} ·
-                    ${countLabel(p.art_count, "art piece")} ·
-                    updated ${fmtDate(p.updated_at)}
+                  <span class="project-stats mono muted">
+                    ${projectStats(p).map((stat, i) => html`
+                      ${i > 0 && html`<span class="stat-sep">·</span>`}
+                      <span>${stat}</span>
+                    `)}
+                    <span class="stat-sep">·</span>
+                    <span>updated ${fmtDate(p.updated_at)}</span>
                   </span>
                 </div>
                 <button class="linkbtn muted" onClick=${() => openRename(p)}>Rename</button>

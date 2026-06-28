@@ -14,15 +14,19 @@ export function WallView({ projectId, roomId, wallId }) {
       .then((d) => {
         if (!alive) return;
         setWall(d.wall);
+        const planCrumb = d.wall.floorplan_id
+          ? { label: d.wall.floorplan_name || "Floor plan", href: `/projects/${projectId}/floorplans/${d.wall.floorplan_id}` }
+          : { label: d.wall.floorplan_name || "Floor plan" };
         crumbs.value = [
           { label: d.wall.project_name, href: `/projects/${projectId}` },
+          planCrumb,
           { label: d.wall.room_name, href: `/projects/${projectId}/rooms/${roomId}` },
           { label: d.wall.name },
         ];
       })
       .catch((e) => alive && setErr(e.message));
     return () => { alive = false; };
-  }, [wallId]);
+  }, [projectId, roomId, wallId]);
 
   return html`
     <main>

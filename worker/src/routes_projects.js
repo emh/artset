@@ -26,6 +26,7 @@ function shapeProject(p) {
 export async function listProjects({ env, session }) {
   const { results } = await env.DB.prepare(
     `SELECT p.id, p.name, p.status, p.created_at, p.updated_at,
+            (SELECT COUNT(*) FROM floorplans fp WHERE fp.project_id = p.id) AS plan_count,
             (SELECT COUNT(*) FROM rooms r WHERE r.project_id = p.id) AS room_count,
             (SELECT COUNT(*) FROM walls w JOIN rooms r ON r.id = w.room_id WHERE r.project_id = p.id) AS wall_count,
             (SELECT COUNT(*) FROM art_pieces a WHERE a.project_id = p.id) AS art_count

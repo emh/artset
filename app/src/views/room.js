@@ -124,7 +124,7 @@ export function RoomView({ projectId, roomId }) {
     const { room: updated } = await api.patch(`/api/rooms/${roomId}`, { name: next });
     setRoom(updated);
     setRoomName(updated.name);
-    crumbs.value = crumbs.value.map((c, i) => (i === 1 ? { ...c, label: updated.name } : c));
+    crumbs.value = crumbs.value.map((c, i) => (i === 2 ? { ...c, label: updated.name } : c));
   }
 
   function closeDialog() {

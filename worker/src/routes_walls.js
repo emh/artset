@@ -67,9 +67,23 @@ export async function getWall({ env, session, params }) {
   const w = await wallScoped(env, session, params.id);
   if (!w) return error(404, "Wall not found");
   const ctx = await env.DB.prepare(
-    "SELECT r.name AS room_name, r.project_id, p.name AS project_name FROM rooms r JOIN projects p ON p.id = r.project_id WHERE r.id = ?"
+    `SELECT r.name AS room_name, r.project_id, r.floorplan_id,
+            p.name AS project_name, fp.name AS floorplan_name
+       FROM rooms r
+       JOIN projects p ON p.id = r.project_id
+       LEFT JOIN floorplans fp ON fp.id = r.floorplan_id
+      WHERE r.id = ?`
   ).bind(w.room_id).first();
-  return json({ wall: { ...shapeWall(w), room_name: ctx && ctx.room_name, project_id: ctx && ctx.project_id, project_name: ctx && ctx.project_name } });
+  return json({
+    wall: {
+      ...shapeWall(w),
+      room_name: ctx && ctx.room_name,
+      project_id: ctx && ctx.project_id,
+      project_name: ctx && ctx.project_name,
+      floorplan_id: ctx && ctx.floorplan_id,
+      floorplan_name: ctx && ctx.floorplan_name,
+    },
+  });
 }
 
 // PATCH /api/walls/:id  { name?, length_inches?, height_inches?, ax?,ay?,bx?,by?, segments? }
