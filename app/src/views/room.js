@@ -3,6 +3,7 @@ import { useState, useRef, useEffect } from "preact/hooks";
 import { api } from "../api.js";
 import { navigate } from "../router.js";
 import { crumbs } from "../store.js";
+import { FloorplanViewport } from "../components/floorplan-viewport.js";
 
 function svgPoint(svg, clientX, clientY) {
   const pt = svg.createSVGPoint();
@@ -28,7 +29,6 @@ export function RoomView({ projectId, roomId }) {
   const [dialogBusy, setDialogBusy] = useState(false);
 
   const svgRef = useRef(null);
-  const wrapRef = useRef(null);
   const startRef = useRef(null);
   const draggingRef = useRef(false);
   const downClientRef = useRef(null);
@@ -101,7 +101,7 @@ export function RoomView({ projectId, roomId }) {
     setPending(line);
     setNameVal(suggestName(line, walls));
     setLenVal("");
-    const wr = wrapRef.current.getBoundingClientRect();
+    const wr = e.currentTarget.closest(".floorplan-viewport-frame").getBoundingClientRect();
     setPop({ left: ((e.clientX + downClientRef.current.x) / 2) - wr.left, top: ((e.clientY + downClientRef.current.y) / 2) - wr.top });
   }
 
@@ -142,25 +142,24 @@ export function RoomView({ projectId, roomId }) {
     } finally { setDialogBusy(false); }
   }
 
+  const imageHref = `/api/projects/${projectId}/floorplans/${floorplan.id}/image?v=${encodeURIComponent(floorplan.image_key || floorplan.id)}`;
   const stage = html`
-    <div ref=${wrapRef} class="stage tool-draw" style="position:relative">
-      <svg ref=${svgRef} style="display:block;width:100%;max-height:72vh" viewBox=${`${vb.x} ${vb.y} ${vb.w} ${vb.h}`}
-        preserveAspectRatio="xMidYMid meet"
-        onPointerDown=${onDown} onPointerMove=${onMove} onPointerUp=${onUp}>
-        <image href=${`/api/projects/${projectId}/floorplans/${floorplan.id}/image?v=${encodeURIComponent(floorplan.image_key || floorplan.id)}`} x="0" y="0" width=${W} height=${H} preserveAspectRatio="none" />
+    <${FloorplanViewport}
+      width=${W}
+      height=${H}
+      viewBox=${vb}
+      imageHref=${imageHref}
+      svgRef=${svgRef}
+      className="tool-draw"
+      ariaLabel="Define walls in room"
+      renderMiniContent=${() => html`
         <rect class="room-rect" x=${room.rect_x} y=${room.rect_y} width=${room.rect_w} height=${room.rect_h} fill="none" />
         ${(walls || []).map((w) => html`
-          <g key=${w.id} onMouseEnter=${() => setHoverId(w.id)} onMouseLeave=${() => setHoverId(null)} style="cursor:pointer"
-             onClick=${() => navigate(`/projects/${projectId}/rooms/${roomId}/walls/${w.id}`)}>
-            <line class=${"wall-line" + (hoverId === w.id ? " is-hover" : "")} x1=${w.ax} y1=${w.ay} x2=${w.bx} y2=${w.by}
-              stroke-width=${stroke} />
-            <text class="wall-label" font-size=${fs} x=${(w.ax + w.bx) / 2} y=${(w.ay + w.by) / 2 - stroke}>${w.name.toUpperCase()}</text>
-          </g>
+          <line class=${"wall-line" + (hoverId === w.id ? " is-hover" : "")} x1=${w.ax} y1=${w.ay} x2=${w.bx} y2=${w.by}
+            stroke-width=${stroke} />
         `)}
-        ${draft && html`<line class="wall-draft" x1=${draft.ax} y1=${draft.ay} x2=${draft.bx} y2=${draft.by} stroke-width=${stroke} />`}
-        ${pending && html`<line class="wall-draft" x1=${pending.ax} y1=${pending.ay} x2=${pending.bx} y2=${pending.by} stroke-width=${stroke} />`}
-      </svg>
-      ${pop && html`
+      `}
+      overlay=${pop && html`
         <div class="name-pop" style=${`left:${pop.left}px; top:${pop.top}px`}>
           <input ref=${nameRef} value=${nameVal} placeholder="Wall name" style="width:120px" name="wall-name" autocomplete="off"
             onInput=${(e) => setNameVal(e.target.value)}
@@ -171,8 +170,23 @@ export function RoomView({ projectId, roomId }) {
           <button class="linkbtn" onClick=${commit}>Add</button>
           <button class="linkbtn muted" onClick=${cancelPending}>✕</button>
         </div>
-      `}
-    </div>`;
+      `}>
+      <g onPointerDown=${onDown} onPointerMove=${onMove} onPointerUp=${onUp}>
+        <rect class="floorplan-hit" x=${vb.x} y=${vb.y} width=${vb.w} height=${vb.h} />
+        <rect class="room-rect" x=${room.rect_x} y=${room.rect_y} width=${room.rect_w} height=${room.rect_h} fill="none" />
+        ${(walls || []).map((w) => html`
+          <g key=${w.id} onMouseEnter=${() => setHoverId(w.id)} onMouseLeave=${() => setHoverId(null)} style="cursor:pointer"
+             onPointerDown=${(e) => e.stopPropagation()}
+             onClick=${() => navigate(`/projects/${projectId}/rooms/${roomId}/walls/${w.id}`)}>
+            <line class=${"wall-line" + (hoverId === w.id ? " is-hover" : "")} x1=${w.ax} y1=${w.ay} x2=${w.bx} y2=${w.by}
+              stroke-width=${stroke} />
+            <text class="wall-label" font-size=${fs} x=${(w.ax + w.bx) / 2} y=${(w.ay + w.by) / 2 - stroke}>${w.name.toUpperCase()}</text>
+          </g>
+        `)}
+        ${draft && html`<line class="wall-draft" x1=${draft.ax} y1=${draft.ay} x2=${draft.bx} y2=${draft.by} stroke-width=${stroke} />`}
+        ${pending && html`<line class="wall-draft" x1=${pending.ax} y1=${pending.ay} x2=${pending.bx} y2=${pending.by} stroke-width=${stroke} />`}
+      </g>
+    <//>`;
 
   const sidebar = html`
     <aside class="sidebar">

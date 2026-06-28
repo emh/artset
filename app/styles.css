@@ -812,6 +812,49 @@ main { padding: 56px 0 120px; }
 .stage img { display: block; width: 100%; user-select: none; -webkit-user-drag: none; }
 .stage .overlay { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; }
 .stage.tool-draw .overlay { cursor: crosshair; }
+.floorplan-viewport {
+  min-width: 0;
+}
+.floorplan-viewport-head {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 10px;
+}
+.floorplan-viewport-frame {
+  position: relative;
+  min-height: 220px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  background: var(--paper-2);
+  line-height: 0;
+  touch-action: none;
+}
+.floorplan-editor-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  transform-origin: center center;
+  will-change: transform;
+}
+.floorplan-editor-svg.tool-draw {
+  cursor: crosshair;
+}
+.floorplan-hit {
+  fill: transparent;
+  pointer-events: all;
+}
+.floorplan-minimap {
+  display: block;
+  width: 180px;
+  height: 120px;
+  margin: 12px 0 0 auto;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  pointer-events: none;
+}
 
 /* room rectangles */
 .room-rect { fill: var(--draw-fill); stroke: var(--draw); stroke-width: 1.5; vector-effect: non-scaling-stroke; }

@@ -3,9 +3,17 @@ import { useState, useRef, useEffect } from "preact/hooks";
 import { api } from "../api.js";
 import { navigate } from "../router.js";
 import { FloorplanLabel } from "./floorplan-label.js";
+import { FloorplanViewport } from "./floorplan-viewport.js";
 
 function normalize(a, b) {
   return { x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), w: Math.abs(b.x - a.x), h: Math.abs(b.y - a.y) };
+}
+
+function svgPoint(svg, clientX, clientY) {
+  const pt = svg.createSVGPoint();
+  pt.x = clientX; pt.y = clientY;
+  const p = pt.matrixTransform(svg.getScreenCTM().inverse());
+  return { x: p.x, y: p.y };
 }
 
 export function RoomEditor({ projectId, floorplan, onDeletePlan, sidebarTop }) {
@@ -15,6 +23,7 @@ export function RoomEditor({ projectId, floorplan, onDeletePlan, sidebarTop }) {
   const [draft, setDraft] = useState(null);      // rect being dragged
   const [pending, setPending] = useState(null);  // finalized rect awaiting a name
   const [nameVal, setNameVal] = useState("");
+  const [pop, setPop] = useState(null);
   const [hoverId, setHoverId] = useState(null);
   const [dialog, setDialog] = useState(null);
   const [dialogBusy, setDialogBusy] = useState(false);
@@ -30,9 +39,9 @@ export function RoomEditor({ projectId, floorplan, onDeletePlan, sidebarTop }) {
   useEffect(() => { if (pending && nameRef.current) nameRef.current.focus(); }, [pending]);
 
   function toPx(e) {
-    const r = svgRef.current.getBoundingClientRect();
-    const x = (e.clientX - r.left) * (W / r.width);
-    const y = (e.clientY - r.top) * (H / r.height);
+    const p = svgPoint(svgRef.current, e.clientX, e.clientY);
+    const x = p.x;
+    const y = p.y;
     return { x: Math.max(0, Math.min(W, x)), y: Math.max(0, Math.min(H, y)) };
   }
 
@@ -56,6 +65,8 @@ export function RoomEditor({ projectId, floorplan, onDeletePlan, sidebarTop }) {
     if (d.w > W * 0.015 && d.h > H * 0.015) {
       setPending(d);
       setNameVal("");
+      const r = e.currentTarget.closest(".floorplan-viewport-frame").getBoundingClientRect();
+      setPop({ left: e.clientX - r.left, top: e.clientY - r.top });
     }
   }
 
@@ -67,9 +78,10 @@ export function RoomEditor({ projectId, floorplan, onDeletePlan, sidebarTop }) {
     });
     setRooms((rs) => [...(rs || []), room]);
     setPending(null);
+    setPop(null);
     setNameVal("");
   }
-  function cancelPending() { setPending(null); setNameVal(""); }
+  function cancelPending() { setPending(null); setPop(null); setNameVal(""); }
 
   function closeDialog() {
     if (dialogBusy) return;
@@ -107,20 +119,34 @@ export function RoomEditor({ projectId, floorplan, onDeletePlan, sidebarTop }) {
     } finally { setDialogBusy(false); }
   }
 
-  // popover position in display px
-  let pop = null;
-  if (pending && svgRef.current) {
-    const r = svgRef.current.getBoundingClientRect();
-    pop = { left: (pending.x / W) * r.width, top: (pending.y / H) * r.height };
-  }
-
   return html`
     <div class="workspace">
       <div>
-        <div class=${"stage tool-draw"} style="position:relative">
-          <img src=${`/api/projects/${projectId}/floorplans/${floorplan.id}/image?v=${encodeURIComponent(floorplan.image_key || floorplan.id)}`} alt="Floor plan" draggable=${false} />
-          <svg class="overlay" ref=${svgRef} viewBox=${`0 0 ${W} ${H}`} preserveAspectRatio="none"
-            onPointerDown=${onDown} onPointerMove=${onMove} onPointerUp=${onUp}>
+        <${FloorplanViewport}
+          width=${W}
+          height=${H}
+          viewBox=${{ x: 0, y: 0, w: W, h: H }}
+          imageHref=${`/api/projects/${projectId}/floorplans/${floorplan.id}/image?v=${encodeURIComponent(floorplan.image_key || floorplan.id)}`}
+          svgRef=${svgRef}
+          className="tool-draw"
+          ariaLabel="Define rooms on floor plan"
+          renderMiniContent=${() => html`
+            ${(rooms || []).map((r) => html`
+              <rect class=${"room-rect" + (hoverId === r.id ? " is-hover" : "")}
+                x=${r.rect_x} y=${r.rect_y} width=${r.rect_w} height=${r.rect_h} />
+            `)}
+          `}
+          overlay=${pop && html`
+            <div class="name-pop" style=${`left:${pop.left}px; top:${pop.top}px`}>
+              <input ref=${nameRef} value=${nameVal} placeholder="Room name" name="room-name" autocomplete="off"
+                onInput=${(e) => setNameVal(e.target.value)}
+                onKeyDown=${(e) => { if (e.key === "Enter") commit(); if (e.key === "Escape") cancelPending(); }} />
+              <button class="linkbtn" onClick=${commit}>Add</button>
+              <button class="linkbtn muted" onClick=${cancelPending}>✕</button>
+            </div>
+          `}>
+          <g onPointerDown=${onDown} onPointerMove=${onMove} onPointerUp=${onUp}>
+            <rect class="floorplan-hit" x="0" y="0" width=${W} height=${H} />
             ${(rooms || []).map((r) => html`
               <g key=${r.id} onMouseEnter=${() => setHoverId(r.id)} onMouseLeave=${() => setHoverId(null)}>
                 <rect class=${"room-rect" + (hoverId === r.id ? " is-hover" : "")}
@@ -130,17 +156,8 @@ export function RoomEditor({ projectId, floorplan, onDeletePlan, sidebarTop }) {
             `)}
             ${draft && html`<rect class="room-draft" x=${draft.x} y=${draft.y} width=${draft.w} height=${draft.h} />`}
             ${pending && html`<rect class="room-draft" x=${pending.x} y=${pending.y} width=${pending.w} height=${pending.h} />`}
-          </svg>
-          ${pop && html`
-            <div class="name-pop" style=${`left:${pop.left}px; top:${pop.top}px`}>
-              <input ref=${nameRef} value=${nameVal} placeholder="Room name" name="room-name" autocomplete="off"
-                onInput=${(e) => setNameVal(e.target.value)}
-                onKeyDown=${(e) => { if (e.key === "Enter") commit(); if (e.key === "Escape") cancelPending(); }} />
-              <button class="linkbtn" onClick=${commit}>Add</button>
-              <button class="linkbtn muted" onClick=${cancelPending}>✕</button>
-            </div>
-          `}
-        </div>
+          </g>
+        <//>
         <p style="margin-top:12px"><button class="linkbtn muted" onClick=${() => setDialog({ type: "delete-plan" })}>Delete plan</button></p>
       </div>
 
