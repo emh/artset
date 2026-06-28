@@ -1,4 +1,5 @@
 import { html } from "htm/preact";
+import { Fragment } from "preact";
 import { useState, useRef, useEffect } from "preact/hooks";
 import { api } from "../api.js";
 
@@ -24,9 +25,31 @@ function svgX(svg, clientX) {
   return pt.matrixTransform(svg.getScreenCTM().inverse()).x;
 }
 
+function svgPoint(svg, clientX, clientY) {
+  const pt = svg.createSVGPoint();
+  pt.x = clientX; pt.y = clientY;
+  return pt.matrixTransform(svg.getScreenCTM().inverse());
+}
+
 // a piece fits if its horizontal span sits entirely within one usable span
 function fitsAt(start, width, segments) {
   return segments.some((s) => start >= s.start - 0.01 && start + width <= s.end + 0.01);
+}
+
+function centeredInSpan(start, width, segments) {
+  const center = start + width / 2;
+  return segments.some((s) => {
+    if (start < s.start - 0.01 || start + width > s.end + 0.01) return false;
+    return Math.abs(center - (s.start + s.end) / 2) <= 0.5;
+  });
+}
+
+function defaultSizeForPiece(piece) {
+  const sizes = piece.sizes || [];
+  if (!sizes.length) return null;
+  const selectedIndex = Number(piece.metadata && piece.metadata.selectedSizeIndex);
+  if (Number.isInteger(selectedIndex) && sizes[selectedIndex]) return sizes[selectedIndex];
+  return sizes[0];
 }
 
 export function WallSpecEditor({ wall, projectId, placeArtId, onChange }) {
@@ -38,11 +61,12 @@ export function WallSpecEditor({ wall, projectId, placeArtId, onChange }) {
   const [live, setLive] = useState(null);
   const [saving, setSaving] = useState(false);
 
-  const [mode, setMode] = useState(placeArtId ? "place" : "usable");
   const [placements, setPlacements] = useState([]);
   const [inventory, setInventory] = useState([]);
   const [selPlace, setSelPlace] = useState(null);
-  const [picking, setPicking] = useState(false);
+  const [hoverPlace, setHoverPlace] = useState(null);
+  const [placementDialog, setPlacementDialog] = useState(null);
+  const [pickSelection, setPickSelection] = useState(null);
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [viewport, setViewport] = useState({ w: 0, h: 0 });
@@ -92,11 +116,12 @@ export function WallSpecEditor({ wall, projectId, placeArtId, onChange }) {
   const visibleH = renderedWallH ? Math.min(1, Math.max(0, (visibleEndY - visibleStartY) / renderedWallH)) : 1;
   const rulerWidth = renderedWallW;
   const wallPixelLeft = viewport.w ? (viewport.w - rulerWidth) / 2 + pan.x : 0;
+  const wallPixelTop = rendererH ? (rendererH - renderedWallH) / 2 + pan.y : 0;
   const rulerTrackWidth = rulerWidth;
   const rulerLeft = wallPixelLeft + 1;
   const xToPx = (x) => Math.max(0, Math.min(viewport.w || 0, wallPixelLeft + (rulerTrackWidth * x) / L));
   const liveMeasures = live
-    ? live.measures || [{ x: live.x, text: live.text }]
+    ? live.measures || [{ x: live.x, text: live.text, centered: live.centered }]
     : [];
   const liveSpan = live && live.span;
   const miniRect = {
@@ -139,7 +164,8 @@ export function WallSpecEditor({ wall, projectId, placeArtId, onChange }) {
   useEffect(() => {
     if (!placeArtId || didAutoPlace.current || !inventory.length) return;
     const piece = inventory.find((p) => p.id === placeArtId);
-    if (piece && piece.sizes.length) { didAutoPlace.current = true; addPlacement(piece, piece.sizes[0]); }
+    const size = piece && defaultSizeForPiece(piece);
+    if (piece && size) { didAutoPlace.current = true; addPlacement(piece, size); }
   }, [placeArtId, inventory]);
 
   // ---------- persistence ----------
@@ -211,11 +237,27 @@ export function WallSpecEditor({ wall, projectId, placeArtId, onChange }) {
     pointers.current.delete(e.pointerId);
     panPoint.current = midpoint();
   }
+  function spanIndexAtClient(clientX, clientY) {
+    const svg = svgRef.current;
+    if (!svg) return null;
+    const r = svg.getBoundingClientRect();
+    if (clientX < r.left || clientX > r.right || clientY < r.top || clientY > r.bottom) return null;
+    const pt = svgPoint(svg, clientX, clientY);
+    if (pt.y < 0 || pt.y > bandH) return null;
+    const idx = segsRef.current.findIndex((s) => pt.x >= s.start && pt.x <= s.end);
+    return idx >= 0 ? idx : null;
+  }
+  function updateHoverSpanFromPointer(e) {
+    setHoverSpan(spanIndexAtClient(e.clientX, e.clientY));
+  }
+  function isSamePlacementHover(e, id) {
+    const next = e.relatedTarget;
+    return !!(next && next.closest && next.closest(`[data-placement-hover="${id}"]`));
+  }
 
   // ---------- usable-space interactions (usable mode) ----------
   function onDownNew(e) {
     if (pointers.current.size >= 2) return;
-    if (mode !== "usable") return;
     e.preventDefault(); e.stopPropagation();
     try { svgRef.current.setPointerCapture(e.pointerId); } catch {}
     const x = clampX(svgX(svgRef.current, e.clientX));
@@ -236,24 +278,28 @@ export function WallSpecEditor({ wall, projectId, placeArtId, onChange }) {
   // ---------- art placement interactions (place mode) ----------
   function onArtDown(e, p) {
     if (pointers.current.size >= 2) return;
-    if (mode !== "place") return;
     e.preventDefault(); e.stopPropagation();
     try { svgRef.current.setPointerCapture(e.pointerId); } catch {}
-    const x = clampX(svgX(svgRef.current, e.clientX));
-    artDrag.current = { id: p.id, grab: x - p.start_inches };
+    const point = svgPoint(svgRef.current, e.clientX, e.clientY);
+    const y = artTop(p);
+    artDrag.current = { id: p.id, grabX: point.x - p.start_inches, grabY: point.y - y };
     setSelPlace(p.id);
-    setLive({ x: p.start_inches + p.width_inches / 2, text: `${Math.round(p.start_inches)}″` });
+    const centerX = p.start_inches + p.width_inches / 2;
+    setLive({ x: centerX, text: `${Math.round(centerX)}″`, centered: centeredInSpan(p.start_inches, p.width_inches, segsRef.current) });
   }
 
   function onMove(e) {
     if (artDrag.current) {
-      const x = clampX(svgX(svgRef.current, e.clientX));
+      const point = svgPoint(svgRef.current, e.clientX, e.clientY);
       const id = artDrag.current.id;
       const p = placeRef.current.find((q) => q.id === id);
       if (!p) return;
-      const ns = Math.max(0, Math.min(L - p.width_inches, x - artDrag.current.grab));
-      setPlace(placeRef.current.map((q) => (q.id === id ? { ...q, start_inches: ns } : q)));
-      setLive({ x: ns + p.width_inches / 2, text: `${Math.round(ns)}″` });
+      const ns = Math.max(0, Math.min(Math.max(0, L - p.width_inches), point.x - artDrag.current.grabX));
+      const ny = Math.max(0, Math.min(Math.max(0, bandH - p.height_inches), point.y - artDrag.current.grabY));
+      const centerHeight = bandH - ny - p.height_inches / 2;
+      const centerX = ns + p.width_inches / 2;
+      setPlace(placeRef.current.map((q) => (q.id === id ? { ...q, start_inches: ns, center_height_inches: centerHeight } : q)));
+      setLive({ x: centerX, text: `${Math.round(centerX)}″`, centered: centeredInSpan(ns, p.width_inches, segsRef.current) });
       return;
     }
     const it = interact.current;
@@ -285,7 +331,7 @@ export function WallSpecEditor({ wall, projectId, placeArtId, onChange }) {
     if (artDrag.current) {
       const id = artDrag.current.id; artDrag.current = null;
       const p = placeRef.current.find((q) => q.id === id);
-      if (p) api.patch(`/api/placements/${id}`, { start_inches: p.start_inches }).catch(() => {});
+      if (p) api.patch(`/api/placements/${id}`, { start_inches: p.start_inches, center_height_inches: p.center_height_inches }).catch(() => {});
       return;
     }
     const it = interact.current;
@@ -313,25 +359,63 @@ export function WallSpecEditor({ wall, projectId, placeArtId, onChange }) {
   async function refreshInventory() {
     if (projectId) api.get(`/api/projects/${projectId}/art`).then((d) => setInventory(d.art)).catch(() => {});
   }
-  async function addPlacement(piece, size) {
-    const span = segments.find((s) => s.end - s.start >= size.width_inches);
-    const start = span ? span.start : 0;
+  function placementStartFor(size, span) {
+    const target = span || segments.find((s) => s.end - s.start >= size.width_inches) || segments[0];
+    const maxStart = Math.max(0, L - size.width_inches);
+    if (!target) return 0;
+    const spanStart = Math.max(0, Math.min(maxStart, target.start));
+    const spanEnd = Math.max(spanStart, Math.min(L, target.end));
+    const centered = spanStart + Math.max(0, (spanEnd - spanStart - size.width_inches) / 2);
+    return Math.max(spanStart, Math.min(Math.min(maxStart, Math.max(spanStart, spanEnd - size.width_inches)), centered));
+  }
+  async function addPlacement(piece, size, span) {
+    const start = placementStartFor(size, span);
+    const center = bandH / 2;
     const { placement } = await api.post(`/api/walls/${wall.id}/placements`, {
-      art_piece_id: piece.id, art_size_id: size.id, start_inches: start,
+      art_piece_id: piece.id, art_size_id: size.id, start_inches: start, center_height_inches: center,
     });
     // placing moves the piece, so re-sync this wall's placements rather than appending
     const { placements } = await api.get(`/api/walls/${wall.id}/placements`);
     setPlace(placements);
     setSelPlace(placement.id);
-    setPicking(false);
-    setMode("place");
+    setPlacementDialog(null);
+    setPickSelection(null);
     refreshInventory();
   }
   async function removePlacement(id) {
     await api.del(`/api/placements/${id}`);
     setPlace(placeRef.current.filter((p) => p.id !== id));
     if (selPlace === id) setSelPlace(null);
+    if (hoverPlace === id) setHoverPlace(null);
     refreshInventory();
+  }
+  function openPlacementDialog(spanIndex) {
+    setPlacementDialog({ spanIndex });
+    setPickSelection(null);
+  }
+  function closePlacementDialog() {
+    setPlacementDialog(null);
+    setPickSelection(null);
+  }
+  function defaultSizeFor(piece) {
+    const sizes = piece.sizes || [];
+    if (!sizes.length) return null;
+    if (piece.metadata && piece.metadata.selectedSizeIndex !== undefined) {
+      const selected = sizes[Number(piece.metadata.selectedSizeIndex)];
+      if (selected) return selected;
+    }
+    if (piece.placed) {
+      const placedSize = sizes.find((s) => s.id === piece.placed.art_size_id);
+      if (placedSize) return placedSize;
+    }
+    return sizes[0];
+  }
+  function confirmPlacement() {
+    if (!placementDialog || !pickSelection) return;
+    const piece = inventory.find((p) => p.id === pickSelection.pieceId);
+    const size = piece && (piece.sizes || []).find((s) => s.id === pickSelection.sizeId);
+    const span = segments[placementDialog.spanIndex];
+    if (piece && size && span) addPlacement(piece, size, span);
   }
 
   // ---------- geometry helpers ----------
@@ -341,15 +425,21 @@ export function WallSpecEditor({ wall, projectId, placeArtId, onChange }) {
   for (let i = 0; i <= L + 0.01; i += step) ticks.push(Math.min(i, L));
   if (ticks[ticks.length - 1] < L - step * 0.4) ticks.push(L);
   const artTop = (p) => (bandH - (p.center_height_inches ?? bandH * 0.5)) - p.height_inches / 2;
+  const artScreenBox = (p) => {
+    const scaleX = L ? rulerTrackWidth / L : 0;
+    const scaleY = bandH ? renderedWallH / bandH : 0;
+    const left = wallPixelLeft + p.start_inches * scaleX;
+    const top = wallPixelTop + artTop(p) * scaleY;
+    const right = left + p.width_inches * scaleX;
+    const bottom = top + p.height_inches * scaleY;
+    return { left, top, right, bottom, width: right - left, height: bottom - top };
+  };
+  const activeSpan = placementDialog ? segments[placementDialog.spanIndex] : null;
 
   return html`
-    <div class="workspace">
-      <div>
-        <div class="mode-tabs">
-          <button class=${"mode-tab" + (mode === "usable" ? " is-active" : "")} onClick=${() => { setMode("usable"); setSelPlace(null); }}>Usable space</button>
-          <button class=${"mode-tab" + (mode === "place" ? " is-active" : "")} onClick=${() => setMode("place")}>Place art</button>
-        </div>
-
+    <${Fragment}>
+      <div class="workspace">
+        <div>
         <div class="wall-render-head">
           <div class="zoom-controls" aria-label="Zoom controls">
             <button class="iconbtn" type="button" title="Zoom out" aria-label="Zoom out" disabled=${zoom <= 1.01} onClick=${() => zoomBy(-0.25)}>-</button>
@@ -362,16 +452,18 @@ export function WallSpecEditor({ wall, projectId, placeArtId, onChange }) {
           onPointerDownCapture=${onViewportPointerDown}
           onPointerMoveCapture=${onViewportPointerMove}
           onPointerUpCapture=${onViewportPointerEnd}
-          onPointerCancelCapture=${onViewportPointerEnd}>
-          <svg ref=${svgRef} class="elevation wall-render-svg" style=${renderedWallW && renderedWallH ? `width:${renderedWallW}px;height:${renderedWallH}px;transform:translate(${pan.x}px, ${pan.y}px)` : ""}
+          onPointerCancelCapture=${onViewportPointerEnd}
+          onPointerMove=${updateHoverSpanFromPointer}
+          onPointerLeave=${() => setHoverSpan(null)}>
+          <svg ref=${svgRef} class=${"elevation wall-render-svg" + (canPan ? " can-pan" : "")} style=${renderedWallW && renderedWallH ? `width:${renderedWallW}px;height:${renderedWallH}px;transform:translate(${pan.x}px, ${pan.y}px)` : ""}
             viewBox=${`0 0 ${L} ${bandH}`}
             preserveAspectRatio="xMidYMid meet" onPointerMove=${onMove} onPointerUp=${onUp}>
-            <rect class="ev-band" x="0" y="0" width=${L} height=${bandH} onPointerDown=${mode === "usable" ? onDownNew : undefined} />
+            <rect class="ev-band" x="0" y="0" width=${L} height=${bandH} onPointerDown=${onDownNew} />
             ${segments.map((s, i) => html`
               <g key=${i}>
                 <rect class=${"ev-usable" + (hoverSpan === i ? " is-hover" : "")} x=${s.start} y="0" width=${Math.max(0, s.end - s.start)} height=${bandH}
-                  onPointerDown=${mode === "usable" ? onDownNew : undefined} />
-                ${mode === "usable" && ["start", "end"].map((edge) => html`
+                  onPointerDown=${onDownNew} />
+                ${["start", "end"].map((edge) => html`
                   <g key=${edge}>
                     <line class="ev-handle" x1=${s[edge]} y1="0" x2=${s[edge]} y2=${bandH} />
                     <rect class="ev-grab" x=${s[edge] - grabW / 2} y="0" width=${grabW} height=${bandH}
@@ -388,15 +480,21 @@ export function WallSpecEditor({ wall, projectId, placeArtId, onChange }) {
               const sel = selPlace === p.id;
               const y = artTop(p);
               return html`
-                <g key=${p.id} class=${"ev-art" + (mode === "place" ? " is-live" : "")} onPointerDown=${(e) => onArtDown(e, p)}>
+                <g key=${p.id} class="ev-art is-live" data-placement-hover=${p.id} onPointerDown=${(e) => onArtDown(e, p)}
+                  onPointerEnter=${() => setHoverPlace(p.id)}
+                  onPointerLeave=${(e) => {
+                    if (isSamePlacementHover(e, p.id)) return;
+                    setHoverPlace((current) => current === p.id ? null : current);
+                  }}>
                   ${p.has_image
                     ? html`<image href=${`/api/art/${p.art_piece_id}/image?v=${encodeURIComponent(p.image_v || "")}`} x=${p.start_inches} y=${y} width=${p.width_inches} height=${p.height_inches} preserveAspectRatio="xMidYMid slice" />`
                     : html`<rect x=${p.start_inches} y=${y} width=${p.width_inches} height=${p.height_inches} fill="#fff" />`}
                   <rect class=${"ev-art-frame" + (ok ? "" : " no-fit") + (sel ? " is-sel" : "")} x=${p.start_inches} y=${y} width=${p.width_inches} height=${p.height_inches} />
-                </g>`;
+                  <rect class="ev-art-hit" x=${p.start_inches} y=${y} width=${p.width_inches} height=${p.height_inches} />
+              </g>`;
             })}
           </svg>
-          ${mode === "usable" && segments.map((s, i) => {
+          ${segments.map((s, i) => {
             const startPx = wallPixelLeft + (rulerTrackWidth * s.start) / L;
             const endPx = wallPixelLeft + (rulerTrackWidth * s.end) / L;
             const visibleStart = Math.max(0, startPx);
@@ -406,14 +504,18 @@ export function WallSpecEditor({ wall, projectId, placeArtId, onChange }) {
             return html`
               <div class=${"wall-span-control" + (hoverSpan === i ? " is-hover" : "")} key=${i} style=${`left:${x}px`}
                 onMouseEnter=${() => setHoverSpan(i)}
-                onMouseLeave=${() => setHoverSpan(null)}
                 onPointerEnter=${() => setHoverSpan(i)}
-                onPointerLeave=${() => setHoverSpan(null)}
                 onFocusIn=${() => setHoverSpan(i)}
                 onFocusOut=${() => setHoverSpan(null)}>
-                <button class="wall-span-delete" type="button"
+                <button class="wall-span-action wall-span-add" type="button"
+                  aria-label=${`Place art in ${Math.round(s.end - s.start)} inch usable span`}
+                  onPointerDown=${(e) => { e.stopPropagation(); }}
+                  onClick=${(e) => { e.stopPropagation(); openPlacementDialog(i); }}>
+                  +
+                </button>
+                <button class="wall-span-action wall-span-delete" type="button"
                   aria-label=${`Delete ${Math.round(s.end - s.start)} inch usable span`}
-                  onPointerDown=${(e) => { e.preventDefault(); e.stopPropagation(); }}
+                  onPointerDown=${(e) => { e.stopPropagation(); }}
                   onClick=${(e) => { e.stopPropagation(); removeSpan(i); }}>
                   X
                 </button>
@@ -422,7 +524,7 @@ export function WallSpecEditor({ wall, projectId, placeArtId, onChange }) {
                 </span>
               </div>`;
           })}
-          ${mode === "usable" && liveSpan && (() => {
+          ${liveSpan && (() => {
             const startPx = wallPixelLeft + (rulerTrackWidth * liveSpan.start) / L;
             const endPx = wallPixelLeft + (rulerTrackWidth * liveSpan.end) / L;
             const visibleStart = Math.max(0, startPx);
@@ -434,10 +536,30 @@ export function WallSpecEditor({ wall, projectId, placeArtId, onChange }) {
                 ${Math.round(liveSpan.end - liveSpan.start)}″
               </span>`;
           })()}
+          ${placements.map((p) => {
+            const box = artScreenBox(p);
+            const visible = box.right > 0 && box.left < (viewport.w || 0) && box.bottom > 0 && box.top < rendererH;
+            if (!visible) return null;
+            return html`
+              <button class=${"wall-span-delete wall-art-delete" + (hoverPlace === p.id ? " is-visible" : "")} type="button"
+                key=${p.id}
+                data-placement-hover=${p.id}
+                style=${`left:${Math.min(viewport.w || 0, Math.max(24, box.right - 4))}px;top:${Math.max(4, Math.min(rendererH - 28, box.top + 4))}px`}
+                aria-label=${`Delete ${p.title} placement`}
+                onMouseEnter=${() => setHoverPlace(p.id)}
+                onMouseLeave=${(e) => {
+                  if (isSamePlacementHover(e, p.id)) return;
+                  setHoverPlace((current) => current === p.id ? null : current);
+                }}
+                onPointerDown=${(e) => { e.stopPropagation(); }}
+                onClick=${(e) => { e.stopPropagation(); removePlacement(p.id); }}>
+                X
+              </button>`;
+          })}
         </div>
         <div class="wall-ruler-viewport">
           ${liveMeasures.map((m, i) => html`
-            <div class="wall-live-measure" key=${i} style=${`left:${xToPx(m.x)}px`}>
+            <div class=${"wall-live-measure" + (m.centered ? " is-centered" : "")} key=${i} style=${`left:${xToPx(m.x)}px`}>
               <span>${m.text}</span>
             </div>
           `)}
@@ -471,17 +593,64 @@ export function WallSpecEditor({ wall, projectId, placeArtId, onChange }) {
           </svg>
         `}
         <p class="mono muted" style="margin-top:12px">
-          ${mode === "usable"
-            ? html`Drag across the wall to mark usable space. Drag the edges to adjust. ${saving ? "· saving…" : ""}`
-            : html`Drag a piece to position it. Pieces outlined in rust don’t fit the usable space.`}
+          Drag across the wall to mark usable space. Drag span edges or placed art to adjust. ${saving ? "· saving…" : ""}
         </p>
       </div>
 
-      ${mode === "usable" ? usableSidebar() : placeSidebar()}
+      ${sidebar()}
     </div>
+    ${placementDialog && html`
+      <div class="modal-backdrop" onClick=${closePlacementDialog}>
+        <div class="modal-panel art-place-modal" role="dialog" aria-modal="true" aria-labelledby="art-place-title" onClick=${(e) => e.stopPropagation()}>
+          <h2 id="art-place-title">Place art</h2>
+          <p class="modal-copy">
+            ${activeSpan ? html`${Math.round(activeSpan.end - activeSpan.start)}″ usable` : "Choose a usable span"}
+          </p>
+          <div class="art-place-grid">
+            ${inventory.length === 0 && html`<p class="swatch-no">No art in inventory yet.</p>`}
+            ${inventory.map((piece) => {
+              const sizes = piece.sizes || [];
+              const selectedSize = pickSelection && pickSelection.pieceId === piece.id
+                ? sizes.find((s) => s.id === pickSelection.sizeId)
+                : null;
+              const displaySize = selectedSize || defaultSizeFor(piece);
+              const selected = !!selectedSize;
+              return html`
+                <button class=${"art-place-card" + (selected ? " is-selected" : "")} type="button" key=${piece.id}
+                  disabled=${!displaySize}
+                  onClick=${() => displaySize && setPickSelection({ pieceId: piece.id, sizeId: displaySize.id })}>
+                  <span class="art-place-thumb">
+                    ${piece.has_image
+                      ? html`<img src=${`/api/art/${piece.id}/image?v=${encodeURIComponent(piece.image_v || "")}`} alt=${piece.title} loading="lazy" />`
+                      : html`<span>No image</span>`}
+                  </span>
+                  <span class="art-place-title">${piece.title || "Untitled"}</span>
+                  ${sizes.length <= 1
+                    ? html`<span class="art-place-size">${displaySize ? html`${+displaySize.width_inches}×${+displaySize.height_inches}″${displaySize.label ? ` · ${displaySize.label}` : ""}` : "No dimensions"}</span>`
+                    : html`<span class="art-place-sizes">
+                      ${sizes.map((size) => {
+                        const isSelectedSize = displaySize && displaySize.id === size.id;
+                        return html`
+                          <span class=${"art-place-size-chip" + (isSelectedSize ? " is-selected" : "")} key=${size.id}
+                            onClick=${(e) => { e.stopPropagation(); setPickSelection({ pieceId: piece.id, sizeId: size.id }); }}>
+                            ${+size.width_inches}×${+size.height_inches}″${size.label ? ` · ${size.label}` : ""}
+                          </span>`;
+                      })}
+                    </span>`}
+                  ${piece.placed && html`<span class="art-place-note">Placed${piece.placed.wall_id === wall.id ? " on this wall" : ""}</span>`}
+                </button>`;
+            })}
+          </div>
+          <div class="modal-actions">
+            <button class="btn primary" type="button" disabled=${!pickSelection} onClick=${confirmPlacement}>OK</button>
+            <button class="btn" type="button" onClick=${closePlacementDialog}>Cancel</button>
+          </div>
+        </div>
+      </div>`}
+    </${Fragment}>
   `;
 
-  function usableSidebar() {
+  function sidebar() {
     return html`
       <aside class="sidebar">
         <div class="eyebrow">Wall</div>
@@ -513,42 +682,18 @@ export function WallSpecEditor({ wall, projectId, placeArtId, onChange }) {
               </div>`)}
           </div>`}
         <p class="count" style="margin-top:18px">${Math.round(usableTotal)}″ usable of ${Math.round(L)}″</p>
-      </aside>`;
-  }
-
-  function placeSidebar() {
-    return html`
-      <aside class="sidebar">
-        <div class="flex between items-center" style="margin-bottom:14px">
-          <div class="eyebrow" style="margin:0">Placed art</div>
-          ${!picking && html`<button class="linkbtn" onClick=${() => setPicking(true)}>+ Add art</button>`}
-        </div>
-
-        ${picking && html`
-          <div class="card" style="padding:16px;margin-bottom:18px">
-            <div class="label" style="margin-bottom:10px">Choose a piece</div>
-            ${inventory.length === 0 && html`<p class="swatch-no">No art in inventory yet.</p>`}
-            ${inventory.map((piece) => html`
-              <div class="pick-piece" key=${piece.id}>
-                <div class="grow"><div class="rname">${piece.title}</div>
-                  ${piece.placed
-                    ? html`<div class="muted" style="font-size:12px">Placed · ${piece.placed.wall_id === wall.id ? "this wall" : `${piece.placed.room_name} · ${piece.placed.wall_name}`}</div>`
-                    : piece.artist && html`<div class="muted" style="font-size:12px">${piece.artist}</div>`}</div>
-                <div class="flex gap-sm" style="flex-wrap:wrap;justify-content:flex-end">
-                  ${piece.sizes.map((s) => html`<button class="chip pick-size" key=${s.id} onClick=${() => addPlacement(piece, s)} title=${piece.placed ? "Move here" : "Place"}>${+s.width_inches}×${+s.height_inches}″</button>`)}
-                </div>
-              </div>`)}
-            <p style="margin-top:10px"><button class="linkbtn muted" onClick=${() => setPicking(false)}>Cancel</button></p>
-          </div>`}
-
-        ${placements.length === 0 && !picking && html`<p class="swatch-no">No art placed on this wall.</p>`}
+        <div class="eyebrow" style="margin-top:24px;margin-bottom:12px">Placed art</div>
+        ${placements.length === 0 && html`<p class="swatch-no">No art placed on this wall.</p>`}
         ${placements.map((p) => {
           const ok = fitsAt(p.start_inches, p.width_inches, segments);
           return html`
-          <div class=${"roomrow" + (selPlace === p.id ? " is-hover" : "")} key=${p.id} onClick=${() => setSelPlace(p.id)}>
+          <div class=${"roomrow wall-span-row" + (selPlace === p.id ? " is-hover" : "")} key=${p.id}
+            onMouseEnter=${() => setHoverPlace(p.id)}
+            onMouseLeave=${() => setHoverPlace((current) => current === p.id ? null : current)}
+            onClick=${() => setSelPlace(p.id)}>
             <span class="grow"><span class="rname">${p.title}</span>
               <span class="mono muted" style="display:block;font-size:12px">${+p.width_inches}×${+p.height_inches}″ · at ${Math.round(p.start_inches)}″ · ${ok ? "fits" : "doesn’t fit"}</span></span>
-            <button class="linkbtn muted" onClick=${(e) => { e.stopPropagation(); removePlacement(p.id); }}>Remove</button>
+            <button class="linkbtn muted" onClick=${(e) => { e.stopPropagation(); removePlacement(p.id); }}>Delete</button>
           </div>`;
         })}
         ${placements.length > 0 && html`<p class="count" style="margin-top:18px">${placements.length} placed</p>`}

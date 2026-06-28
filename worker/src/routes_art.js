@@ -66,7 +66,7 @@ export async function listArt({ env, session, params }) {
   ).bind(project.id).all();
   const sizeMap = await sizesFor(env, results.map((a) => a.id));
   const placedRows = (await env.DB.prepare(
-    `SELECT pl.art_piece_id, pl.wall_id, pl.start_inches, pl.center_height_inches,
+    `SELECT pl.id, pl.art_piece_id, pl.wall_id, pl.start_inches, pl.center_height_inches,
             w.name AS wall_name, r.name AS room_name,
             sz.width_inches, sz.height_inches, sz.label AS size_label
        FROM placements pl JOIN walls w ON w.id = pl.wall_id JOIN rooms r ON r.id = w.room_id
@@ -74,6 +74,7 @@ export async function listArt({ env, session, params }) {
       WHERE r.project_id = ?`
   ).bind(project.id).all()).results;
   const placedMap = new Map(placedRows.map((p) => [p.art_piece_id, {
+    id: p.id,
     wall_id: p.wall_id,
     wall_name: p.wall_name,
     room_name: p.room_name,
