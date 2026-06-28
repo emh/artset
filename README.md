@@ -127,8 +127,8 @@ prototype/                   original throwaway prototypes (reference only)
 | `studios` | the workspace/tenant |
 | `users` | belong to a studio; `username` unique per studio, `password_hash` (PBKDF2) |
 | `projects` | belong to a studio |
-| `floorplans` | one plan image per project (R2 `image_key`, px dimensions) |
-| `rooms` | a named rectangle over the plan (px coords) |
+| `floorplans` | named plan images for a project (R2 `image_key`, px dimensions) |
+| `rooms` | a named rectangle over one floor plan (px coords) |
 | `walls` | a drawn line (px) with `length_inches`, `height_inches`, and `segments` (JSON array of usable spans, in inches) |
 | `art_pieces` | inventory item (title/artist/medium/price, optional R2 image) |
 | `art_sizes` | one or more size options (W×H, optional label) per piece |
@@ -146,8 +146,8 @@ All under `/api`. Authenticated routes require the session cookie; `*/public/*` 
 
 **Auth** — `POST /auth/signup`, `POST /auth/login`, `POST /auth/logout`, `GET /auth/me`
 **Projects** — `GET|POST /projects`, `GET|PATCH|DELETE /projects/:id`
-**Floor plan** — `POST /projects/:id/floorplan` (multipart), `GET /projects/:id/plan-image`
-**Rooms** — `GET|POST /projects/:id/rooms`, `GET|PATCH|DELETE /rooms/:id`
+**Floor plans** — `GET|POST /projects/:id/floorplans`, `GET|PATCH|DELETE /projects/:id/floorplans/:floorplanId`, `GET /projects/:id/floorplans/:floorplanId/image`
+**Rooms** — `GET|POST /projects/:id/floorplans/:floorplanId/rooms`, `GET|PATCH|DELETE /rooms/:id`
 **Walls** — `GET|POST /rooms/:id/walls`, `GET|PATCH|DELETE /walls/:id`
 **Art** — `GET|POST /projects/:id/art`, `GET|PATCH|DELETE /art/:id`, `POST|GET /art/:id/image`
 **Placements** — `GET|POST /walls/:id/placements`, `PATCH|DELETE /placements/:id`

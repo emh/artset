@@ -8,7 +8,7 @@ function normalize(a, b) {
   return { x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), w: Math.abs(b.x - a.x), h: Math.abs(b.y - a.y) };
 }
 
-export function RoomEditor({ projectId, floorplan, onDeletePlan }) {
+export function RoomEditor({ projectId, floorplan, onDeletePlan, sidebarTop }) {
   const W = floorplan.width_px, H = floorplan.height_px;
   const fs = Math.max(10, Math.round(W * 0.013)); // label size in image units
   const [rooms, setRooms] = useState(null);
@@ -24,8 +24,8 @@ export function RoomEditor({ projectId, floorplan, onDeletePlan }) {
   const nameRef = useRef(null);
 
   useEffect(() => {
-    api.get(`/api/projects/${projectId}/rooms`).then((d) => setRooms(d.rooms));
-  }, [projectId]);
+    api.get(`/api/projects/${projectId}/floorplans/${floorplan.id}/rooms`).then((d) => setRooms(d.rooms));
+  }, [projectId, floorplan.id]);
 
   useEffect(() => { if (pending && nameRef.current) nameRef.current.focus(); }, [pending]);
 
@@ -62,7 +62,7 @@ export function RoomEditor({ projectId, floorplan, onDeletePlan }) {
   async function commit() {
     const name = nameVal.trim();
     if (!name || !pending) return;
-    const { room } = await api.post(`/api/projects/${projectId}/rooms`, {
+    const { room } = await api.post(`/api/projects/${projectId}/floorplans/${floorplan.id}/rooms`, {
       name, rect_x: pending.x, rect_y: pending.y, rect_w: pending.w, rect_h: pending.h,
     });
     setRooms((rs) => [...(rs || []), room]);
@@ -101,7 +101,7 @@ export function RoomEditor({ projectId, floorplan, onDeletePlan }) {
     if (!dialog || dialog.type !== "delete-plan") return;
     setDialogBusy(true);
     try {
-      await api.del(`/api/projects/${projectId}/floorplan`);
+      await api.del(`/api/projects/${projectId}/floorplans/${floorplan.id}`);
       setDialog(null);
       if (onDeletePlan) onDeletePlan();
     } finally { setDialogBusy(false); }
@@ -118,7 +118,7 @@ export function RoomEditor({ projectId, floorplan, onDeletePlan }) {
     <div class="workspace">
       <div>
         <div class=${"stage tool-draw"} style="position:relative">
-          <img src=${`/api/projects/${projectId}/plan-image?v=${floorplan.id}`} alt="Floor plan" draggable=${false} />
+          <img src=${`/api/projects/${projectId}/floorplans/${floorplan.id}/image?v=${encodeURIComponent(floorplan.image_key || floorplan.id)}`} alt="Floor plan" draggable=${false} />
           <svg class="overlay" ref=${svgRef} viewBox=${`0 0 ${W} ${H}`} preserveAspectRatio="none"
             onPointerDown=${onDown} onPointerMove=${onMove} onPointerUp=${onUp}>
             ${(rooms || []).map((r) => html`
@@ -145,6 +145,7 @@ export function RoomEditor({ projectId, floorplan, onDeletePlan }) {
       </div>
 
       <aside class="sidebar">
+        ${sidebarTop}
         <div class="eyebrow">Rooms</div>
         <p class="muted" style="font-size:13px;margin-top:-8px;margin-bottom:18px">Drag a rectangle around each room, then name it.</p>
         ${rooms === null && html`<p class="spinner">Loading…</p>`}

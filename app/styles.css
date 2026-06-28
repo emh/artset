@@ -741,6 +741,69 @@ main { padding: 56px 0 120px; }
 .workspace > div { min-width: 0; }
 @media (max-width: 900px) { .workspace { grid-template-columns: 1fr; } }
 
+.floorplan-index { display: grid; gap: 34px; }
+.floorplan-list {
+  border-top: 1px solid var(--line);
+}
+.floorplan-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 34%) minmax(0, 1fr);
+  gap: 28px;
+  padding: 22px 0;
+  border-bottom: 1px solid var(--line);
+  align-items: start;
+}
+.floorplan-thumb {
+  display: block;
+  border: 1px solid var(--line);
+  background: var(--paper-2);
+}
+.floorplan-thumb:hover { border-color: var(--ink); }
+.floorplan-thumb img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: contain;
+}
+.floorplan-drop-thumb {
+  min-height: 0;
+  aspect-ratio: 4 / 3;
+  padding: 0 18px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.floorplan-add-row .floorplan-name {
+  color: var(--muted);
+}
+.floorplan-add-row .field {
+  max-width: 320px;
+}
+.floorplan-name {
+  display: inline-block;
+  margin-bottom: 14px;
+  font-family: var(--font-display);
+  font-size: 22px;
+  line-height: 1.15;
+  letter-spacing: var(--track-tight);
+  text-transform: uppercase;
+}
+.floorplan-room-list {
+  margin: 0;
+  padding-left: 20px;
+  font-family: var(--font-display);
+  font-size: 15px;
+  letter-spacing: var(--track-tight);
+}
+.floorplan-room-list li { padding: 5px 0; }
+.floorplan-room-list a:hover { color: var(--muted); }
+.floorplan-sidebar-fields {
+  margin-bottom: 34px;
+}
+@media (max-width: 720px) {
+  .floorplan-row { grid-template-columns: 1fr; }
+}
+
 .sidebar .eyebrow { margin-bottom: 18px; }
 .sidebar .count { font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
 

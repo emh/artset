@@ -42,10 +42,11 @@ export function RoomView({ projectId, roomId }) {
       api.get(`/api/rooms/${roomId}/walls`),
     ]).then(([p, r, w]) => {
       if (!alive) return;
-      if (!p.floorplan) { setErr("This project has no floor plan yet."); return; }
-      setFloorplan(p.floorplan); setRoom(r.room); setRoomName(r.room.name); setWalls(w.walls);
+      if (!r.floorplan) { setErr("This room has no floor plan."); return; }
+      setFloorplan(r.floorplan); setRoom(r.room); setRoomName(r.room.name); setWalls(w.walls);
       crumbs.value = [
         { label: p.project.name, href: `/projects/${projectId}` },
+        { label: r.floorplan.name || "Floor plan", href: `/projects/${projectId}/floorplans/${r.floorplan.id}` },
         { label: r.room.name, href: `/projects/${projectId}/rooms/${roomId}` },
       ];
     }).catch((e) => alive && setErr(e.message));
@@ -146,7 +147,7 @@ export function RoomView({ projectId, roomId }) {
       <svg ref=${svgRef} style="display:block;width:100%;max-height:72vh" viewBox=${`${vb.x} ${vb.y} ${vb.w} ${vb.h}`}
         preserveAspectRatio="xMidYMid meet"
         onPointerDown=${onDown} onPointerMove=${onMove} onPointerUp=${onUp}>
-        <image href=${`/api/projects/${projectId}/plan-image?v=${floorplan.id}`} x="0" y="0" width=${W} height=${H} preserveAspectRatio="none" />
+        <image href=${`/api/projects/${projectId}/floorplans/${floorplan.id}/image?v=${encodeURIComponent(floorplan.image_key || floorplan.id)}`} x="0" y="0" width=${W} height=${H} preserveAspectRatio="none" />
         <rect class="room-rect" x=${room.rect_x} y=${room.rect_y} width=${room.rect_w} height=${room.rect_h} fill="none" />
         ${(walls || []).map((w) => html`
           <g key=${w.id} onMouseEnter=${() => setHoverId(w.id)} onMouseLeave=${() => setHoverId(null)} style="cursor:pointer"

@@ -1,5 +1,6 @@
 import { json, error, readJson, randomId, nowMs } from "./json.js";
 import { loadProject } from "./routes_projects.js";
+import { loadFloorplan } from "./routes_floorplan.js";
 
 const id = (p) => `${p}_${randomId(12)}`;
 
@@ -14,26 +15,41 @@ export async function roomScoped(env, session, roomId) {
 export async function getRoom({ env, session, params }) {
   const room = await roomScoped(env, session, params.id);
   if (!room) return error(404, "Room not found");
-  return json({ room });
+  const floorplan = room.floorplan_id
+    ? await env.DB.prepare("SELECT id, project_id, name, image_key, width_px, height_px FROM floorplans WHERE id = ?").bind(room.floorplan_id).first()
+    : null;
+  return json({ room, floorplan });
 }
 
 const num = (v) => (typeof v === "number" && isFinite(v) ? v : null);
 
-// GET /api/projects/:id/rooms
-export async function listRooms({ env, session, params }) {
+// GET /api/projects/:id/rooms or /api/projects/:id/floorplans/:floorplanId/rooms
+export async function listRooms({ env, session, params, request }) {
   const project = await loadProject(env, session, params.id);
   if (!project) return error(404, "Project not found");
+  const floorplanId = params.floorplanId || new URL(request.url).searchParams.get("floorplanId");
+  if (floorplanId) {
+    const loaded = await loadFloorplan(env, session, project.id, floorplanId);
+    if (!loaded) return error(404, "Floor plan not found");
+    const { results } = await env.DB.prepare(
+      "SELECT id, project_id, floorplan_id, name, rect_x, rect_y, rect_w, rect_h, sort FROM rooms WHERE floorplan_id = ? ORDER BY sort ASC"
+    ).bind(floorplanId).all();
+    return json({ rooms: results });
+  }
   const { results } = await env.DB.prepare(
-    "SELECT id, name, rect_x, rect_y, rect_w, rect_h, sort FROM rooms WHERE project_id = ? ORDER BY sort ASC"
+    "SELECT id, project_id, floorplan_id, name, rect_x, rect_y, rect_w, rect_h, sort FROM rooms WHERE project_id = ? ORDER BY sort ASC"
   ).bind(project.id).all();
   return json({ rooms: results });
 }
 
-// POST /api/projects/:id/rooms  { name, rect_x, rect_y, rect_w, rect_h }
+// POST /api/projects/:id/floorplans/:floorplanId/rooms  { name, rect_x, rect_y, rect_w, rect_h }
 export async function createRoom({ env, session, params, request }) {
   const project = await loadProject(env, session, params.id);
   if (!project) return error(404, "Project not found");
   const b = (await readJson(request)) || {};
+  const floorplanId = params.floorplanId || b.floorplan_id;
+  const loaded = floorplanId ? await loadFloorplan(env, session, project.id, floorplanId) : null;
+  if (!loaded) return error(404, "Floor plan not found");
   const name = String(b.name || "").trim();
   const x = num(b.rect_x), y = num(b.rect_y), w = num(b.rect_w), h = num(b.rect_h);
   if (!name) return error(400, "Room name is required");
@@ -42,9 +58,9 @@ export async function createRoom({ env, session, params, request }) {
   const rid = id("room");
   const sort = nowMs();
   await env.DB.prepare(
-    "INSERT INTO rooms (id, project_id, name, rect_x, rect_y, rect_w, rect_h, sort) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
-  ).bind(rid, project.id, name, x, y, w, h, sort).run();
-  return json({ room: { id: rid, name, rect_x: x, rect_y: y, rect_w: w, rect_h: h, sort } });
+    "INSERT INTO rooms (id, project_id, floorplan_id, name, rect_x, rect_y, rect_w, rect_h, sort) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+  ).bind(rid, project.id, loaded.floorplan.id, name, x, y, w, h, sort).run();
+  return json({ room: { id: rid, project_id: project.id, floorplan_id: loaded.floorplan.id, name, rect_x: x, rect_y: y, rect_w: w, rect_h: h, sort } });
 }
 
 // PATCH /api/rooms/:id  { name?, rect_x?, rect_y?, rect_w?, rect_h? }

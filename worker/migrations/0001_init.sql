@@ -28,10 +28,11 @@ CREATE TABLE projects (
 );
 CREATE INDEX idx_projects_studio ON projects(studio_id);
 
--- One uploaded plan image per project (v1).
+-- Named uploaded plan images per project.
 CREATE TABLE floorplans (
   id          TEXT PRIMARY KEY,
   project_id  TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  name        TEXT NOT NULL DEFAULT 'Floor plan',
   image_key   TEXT NOT NULL,        -- R2 object key
   width_px    INTEGER NOT NULL,
   height_px   INTEGER NOT NULL
@@ -42,6 +43,7 @@ CREATE INDEX idx_floorplans_project ON floorplans(project_id);
 CREATE TABLE rooms (
   id          TEXT PRIMARY KEY,
   project_id  TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  floorplan_id TEXT NOT NULL REFERENCES floorplans(id) ON DELETE CASCADE,
   name        TEXT NOT NULL,
   rect_x      REAL NOT NULL,
   rect_y      REAL NOT NULL,
@@ -50,6 +52,7 @@ CREATE TABLE rooms (
   sort        INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX idx_rooms_project ON rooms(project_id);
+CREATE INDEX idx_rooms_floorplan ON rooms(floorplan_id);
 
 -- Walls are user-drawn line segments (px coords) with a user-entered length in inches.
 -- segments = JSON array of USABLE spans in inches: [{ "start": n, "end": n }, ...]

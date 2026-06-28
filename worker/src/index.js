@@ -9,7 +9,10 @@ import { signup, login, logout, me } from "./routes_auth.js";
 import {
   listProjects, createProject, getProject, updateProject, deleteProject,
 } from "./routes_projects.js";
-import { uploadFloorplan, getPlanImage, deleteFloorplan } from "./routes_floorplan.js";
+import {
+  listFloorplans, getFloorplan, uploadFloorplan, updateFloorplan,
+  getFloorplanImage, getPlanImage, deleteFloorplan, deleteProjectFloorplans,
+} from "./routes_floorplan.js";
 import { listRooms, createRoom, updateRoom, deleteRoom, getRoom } from "./routes_rooms.js";
 import { listWalls, createWall, getWall, updateWall, deleteWall } from "./routes_walls.js";
 import {
@@ -50,13 +53,21 @@ router.patch("/api/projects/:id", auth(updateProject));
 router.delete("/api/projects/:id", auth(deleteProject));
 
 // floor plan
+router.get("/api/projects/:id/floorplans", auth(listFloorplans));
+router.post("/api/projects/:id/floorplans", auth(uploadFloorplan));
+router.get("/api/projects/:id/floorplans/:floorplanId", auth(getFloorplan));
+router.patch("/api/projects/:id/floorplans/:floorplanId", auth(updateFloorplan));
+router.delete("/api/projects/:id/floorplans/:floorplanId", auth(deleteFloorplan));
+router.get("/api/projects/:id/floorplans/:floorplanId/image", auth(getFloorplanImage));
 router.post("/api/projects/:id/floorplan", auth(uploadFloorplan));
-router.delete("/api/projects/:id/floorplan", auth(deleteFloorplan));
+router.delete("/api/projects/:id/floorplan", auth(deleteProjectFloorplans));
 router.get("/api/projects/:id/plan-image", auth(getPlanImage));
 
 // rooms
 router.get("/api/projects/:id/rooms", auth(listRooms));
 router.post("/api/projects/:id/rooms", auth(createRoom));
+router.get("/api/projects/:id/floorplans/:floorplanId/rooms", auth(listRooms));
+router.post("/api/projects/:id/floorplans/:floorplanId/rooms", auth(createRoom));
 router.get("/api/rooms/:id", auth(getRoom));
 router.patch("/api/rooms/:id", auth(updateRoom));
 router.delete("/api/rooms/:id", auth(deleteRoom));

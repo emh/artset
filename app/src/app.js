@@ -4,7 +4,7 @@ import { path, onLinkClick, currentPathname, matchRoute, navigate } from "./rout
 import { me, authReady, loadMe, logout, crumbs } from "./store.js";
 import { AuthView } from "./views/auth.js";
 import { Dashboard } from "./views/dashboard.js";
-import { ProjectView } from "./views/project.js";
+import { ProjectView, FloorplanView } from "./views/project.js";
 import { RoomView } from "./views/room.js";
 import { WallView } from "./views/wall.js";
 import { ArtView } from "./views/art.js";
@@ -15,6 +15,7 @@ function TopBar() {
   const items = crumbs.value;
   const pathname = currentPathname();
   const projectMatch = matchRoute("/projects/:id", pathname)
+    || matchRoute("/projects/:id/floorplans/:floorplanId", pathname)
     || matchRoute("/projects/:id/art", pathname)
     || matchRoute("/projects/:id/review", pathname)
     || matchRoute("/projects/:id/rooms/:roomId", pathname)
@@ -70,12 +71,14 @@ export function App() {
   let view;
   const wallMatch = matchRoute("/projects/:id/rooms/:roomId/walls/:wallId", pathname);
   const roomMatch = matchRoute("/projects/:id/rooms/:roomId", pathname);
+  const floorplanMatch = matchRoute("/projects/:id/floorplans/:floorplanId", pathname);
   const artMatch = matchRoute("/projects/:id/art", pathname);
   const reviewMatch = matchRoute("/projects/:id/review", pathname);
   const projectMatch = matchRoute("/projects/:id", pathname);
   if (pathname === "/") view = html`<${Dashboard} />`;
   else if (wallMatch) view = html`<${WallView} projectId=${wallMatch.id} roomId=${wallMatch.roomId} wallId=${wallMatch.wallId} />`;
   else if (roomMatch) view = html`<${RoomView} projectId=${roomMatch.id} roomId=${roomMatch.roomId} />`;
+  else if (floorplanMatch) view = html`<${FloorplanView} projectId=${floorplanMatch.id} floorplanId=${floorplanMatch.floorplanId} />`;
   else if (artMatch) view = html`<${ArtView} projectId=${artMatch.id} />`;
   else if (reviewMatch) view = html`<${ReviewView} projectId=${reviewMatch.id} />`;
   else if (projectMatch) view = html`<${ProjectView} id=${projectMatch.id} />`;

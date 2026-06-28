@@ -61,9 +61,16 @@ export async function getProject({ env, session, params }) {
   const project = await loadProject(env, session, params.id);
   if (!project) return error(404, "Project not found");
   const floorplan = await env.DB.prepare(
-    "SELECT id, image_key, width_px, height_px FROM floorplans WHERE project_id = ?"
+    "SELECT id, name, image_key, width_px, height_px FROM floorplans WHERE project_id = ? ORDER BY rowid ASC LIMIT 1"
   ).bind(project.id).first();
-  return json({ project: shapeProject(project), floorplan: floorplan || null });
+  const { results } = await env.DB.prepare(
+    `SELECT fp.id, fp.name, fp.image_key, fp.width_px, fp.height_px,
+            (SELECT COUNT(*) FROM rooms r WHERE r.floorplan_id = fp.id) AS room_count
+       FROM floorplans fp
+      WHERE fp.project_id = ?
+      ORDER BY fp.rowid ASC`
+  ).bind(project.id).all();
+  return json({ project: shapeProject(project), floorplan: floorplan || null, floorplans: results });
 }
 
 // PATCH /api/projects/:id  { name?, status?, metadata? }
