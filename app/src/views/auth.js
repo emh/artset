@@ -7,7 +7,7 @@ export function AuthView() {
   const [mode, setMode] = useState("login"); // 'login' | 'signup'
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
-  const [f, setF] = useState({ studioName: "", name: "", email: "", password: "" });
+  const [f, setF] = useState({ studioName: "", name: "", username: "", loginId: "", password: "" });
 
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
 
@@ -17,7 +17,7 @@ export function AuthView() {
     setBusy(true);
     try {
       if (mode === "signup") await signup(f);
-      else await login(f.email, f.password);
+      else await login(f.loginId, f.password);
       navigate("/");
     } catch (ex) {
       setErr(ex.message);
@@ -48,10 +48,16 @@ export function AuthView() {
               <input class="input" name="name" autocomplete="name" value=${f.name} onInput=${set("name")} placeholder="Full name" />
             </label>
           `}
-          <label class="field">
-            <span class="label">Email</span>
-            <input class="input" type="email" name="email" autocomplete="email" value=${f.email} onInput=${set("email")} placeholder="you@studio.com" />
-          </label>
+          ${!isSignup && html`
+            <label class="field">
+              <span class="label">Studio / username</span>
+              <input class="input" name="username" autocomplete="username" value=${f.loginId} onInput=${set("loginId")} placeholder="gaile-guevara-studio/evan" />
+            </label>
+          `}
+          ${isSignup && html`<label class="field">
+            <span class="label">Username</span>
+            <input class="input" name="username" autocomplete="username" value=${f.username} onInput=${set("username")} placeholder="evan" />
+          </label>`}
           <label class="field">
             <span class="label">Password</span>
             <input class="input" type="password" name="password" autocomplete=${isSignup ? "new-password" : "current-password"} value=${f.password} onInput=${set("password")} placeholder=${isSignup ? "At least 8 characters" : "Password"} />

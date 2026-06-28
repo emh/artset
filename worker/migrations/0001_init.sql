@@ -10,12 +10,13 @@ CREATE TABLE studios (
 CREATE TABLE users (
   id            TEXT PRIMARY KEY,
   studio_id     TEXT NOT NULL REFERENCES studios(id),
-  email         TEXT NOT NULL UNIQUE,
+  username      TEXT NOT NULL,
   password_hash TEXT NOT NULL,
   name          TEXT NOT NULL,
   created_at    INTEGER NOT NULL
 );
 CREATE INDEX idx_users_studio ON users(studio_id);
+CREATE UNIQUE INDEX idx_users_studio_username ON users(studio_id, username);
 
 CREATE TABLE projects (
   id          TEXT PRIMARY KEY,

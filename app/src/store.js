@@ -16,8 +16,8 @@ export async function loadMe() {
   }
 }
 
-export async function login(email, password) {
-  me.value = await api.post("/api/auth/login", { email, password });
+export async function login(loginId, password) {
+  me.value = await api.post("/api/auth/login", { login: loginId, password });
   return me.value;
 }
 

@@ -60,7 +60,7 @@ function randomToken(bytes = 24) {
 // --- sessions (KV) ---
 export async function createSession(env, user) {
   const id = randomToken();
-  const payload = { userId: user.id, studioId: user.studio_id, email: user.email, name: user.name };
+  const payload = { userId: user.id, studioId: user.studio_id, username: user.username, name: user.name };
   await env.KV.put(`sess:${id}`, JSON.stringify(payload), { expirationTtl: SESSION_TTL_S });
   return id;
 }
@@ -72,8 +72,23 @@ export async function getSession(env, request) {
   if (!raw) return null;
   try {
     const data = JSON.parse(raw);
-    data.sessionId = id;
-    return data;
+    const user = await env.DB.prepare(
+      `SELECT u.id, u.studio_id, u.username, u.name
+       FROM users u
+       JOIN studios s ON s.id = u.studio_id
+       WHERE u.id = ?`
+    ).bind(data.userId).first();
+    if (!user) {
+      await env.KV.delete(`sess:${id}`);
+      return null;
+    }
+    return {
+      sessionId: id,
+      userId: user.id,
+      studioId: user.studio_id,
+      username: user.username,
+      name: user.name,
+    };
   } catch {
     return null;
   }

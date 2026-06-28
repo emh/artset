@@ -71,7 +71,7 @@ no bundler. Wrangler is the only tool.
   auth-checked Worker routes (image URLs are cache-busted with a `?v=` token so a replaced
   image shows immediately).
 - **KV** — session id → user, keyed by an httpOnly cookie.
-- **Auth** — email + password hashed with **WebCrypto PBKDF2** (no native deps); session
+- **Auth** — studio login + username + password hashed with **WebCrypto PBKDF2** (no native deps); session
   cookie is `HttpOnly; SameSite=Lax`, and `Secure` in production (omitted only on
   `localhost`). Client share links are unguessable random tokens — no client accounts in v1.
 - **Tenancy** — every project-scoped query filters on the caller's `studio_id`; share-link
@@ -125,7 +125,7 @@ prototype/                   original throwaway prototypes (reference only)
 | Table | Notes |
 | --- | --- |
 | `studios` | the workspace/tenant |
-| `users` | belong to a studio; `email` unique, `password_hash` (PBKDF2) |
+| `users` | belong to a studio; `username` unique per studio, `password_hash` (PBKDF2) |
 | `projects` | belong to a studio |
 | `floorplans` | one plan image per project (R2 `image_key`, px dimensions) |
 | `rooms` | a named rectangle over the plan (px coords) |
