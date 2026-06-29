@@ -2,6 +2,7 @@ import { html } from "htm/preact";
 import { useState, useEffect } from "preact/hooks";
 import { api } from "../api.js";
 import { FloorplanLabel } from "../components/floorplan-label.js";
+import { FloorplanViewport } from "../components/floorplan-viewport.js";
 import { ReviewElevation } from "../components/review-elevation.js";
 import { crumbs } from "../store.js";
 
@@ -99,7 +100,7 @@ export function ReviewView({ projectId, token }) {
   function projectPanel() {
     if (!floorplan) return html`<div class="empty"><p>No floor plan uploaded.</p></div>`;
     const W = floorplan.width_px, H = floorplan.height_px;
-    const fs = Math.max(10, W * 0.013);
+    const labelSize = 10;
     return html`
       <section class="review-panel">
         <div class="review-panel-head">
@@ -108,9 +109,19 @@ export function ReviewView({ projectId, token }) {
             <h1>${project.name}</h1>
           </div>
         </div>
-        <div class="stage review-stage">
-          <img src=${planImageUrl} alt="Floor plan" draggable=${false} />
-          <svg class="overlay" viewBox=${`0 0 ${W} ${H}`} preserveAspectRatio="none" aria-label="Project rooms">
+        <${FloorplanViewport}
+          width=${W}
+          height=${H}
+          viewBox=${{ x: 0, y: 0, w: W, h: H }}
+          imageHref=${planImageUrl}
+          ariaLabel="Project rooms"
+          title=${project.name}
+          renderMiniContent=${() => html`
+            ${rooms.map((room) => html`
+              <rect class="room-rect" x=${room.rect_x} y=${room.rect_y} width=${room.rect_w} height=${room.rect_h} />
+            `)}
+          `}>
+          ${({ displayScale }) => html`
             ${rooms.map((room) => {
               const key = `room:${room.id}`;
               return html`
@@ -120,11 +131,17 @@ export function ReviewView({ projectId, token }) {
                   onClick=${() => select({ type: "room", id: room.id })}>
                   <rect class=${"room-rect" + (hoverKey === key ? " is-hover" : "")}
                     x=${room.rect_x} y=${room.rect_y} width=${room.rect_w} height=${room.rect_h} />
-                  <${FloorplanLabel} text=${room.name} fontSize=${fs} x=${room.rect_x + fs * 0.5} y=${room.rect_y + fs * 1.5} />
+                  <${FloorplanLabel}
+                    text=${room.name}
+                    fontSize=${labelSize}
+                    displayScale=${displayScale}
+                    x=${room.rect_x + (labelSize * 0.5) / displayScale}
+                    y=${room.rect_y + (labelSize * 1.5) / displayScale}
+                  />
                 </g>`;
             })}
-          </svg>
-        </div>
+          `}
+        <//>
       </section>`;
   }
 
@@ -133,7 +150,7 @@ export function ReviewView({ projectId, token }) {
     const pad = 0.08 * Math.max(room.rect_w, room.rect_h);
     const vb = { x: room.rect_x - pad, y: room.rect_y - pad, w: room.rect_w + 2 * pad, h: room.rect_h + 2 * pad };
     const stroke = Math.max(4, Math.min(room.rect_w, room.rect_h) * 0.02);
-    const fs = Math.max(8, vb.w * 0.025);
+    const labelSize = 10;
     return html`
       <section class="review-panel">
         <div class="review-panel-head">
@@ -142,11 +159,28 @@ export function ReviewView({ projectId, token }) {
             <h1>${room.name}</h1>
           </div>
         </div>
-        <div class="review-room-view">
-          <svg viewBox=${`${vb.x} ${vb.y} ${vb.w} ${vb.h}`} preserveAspectRatio="xMidYMid meet" aria-label=${`${room.name} walls`}>
-            <image href=${planImageUrl} x="0" y="0" width=${floorplan.width_px} height=${floorplan.height_px} preserveAspectRatio="none" />
+        <${FloorplanViewport}
+          width=${floorplan.width_px}
+          height=${floorplan.height_px}
+          viewBox=${vb}
+          imageHref=${planImageUrl}
+          ariaLabel=${`${room.name} walls`}
+          title=${room.name}
+          renderMiniContent=${() => html`
             <rect class="room-rect is-hover" x=${room.rect_x} y=${room.rect_y} width=${room.rect_w} height=${room.rect_h} />
-            <${FloorplanLabel} text=${room.name} fontSize=${fs} x=${room.rect_x + fs * 0.5} y=${room.rect_y + fs * 1.5} />
+            ${(room.walls || []).map((wall) => html`
+              <line class="wall-line" x1=${wall.ax} y1=${wall.ay} x2=${wall.bx} y2=${wall.by} stroke-width=${stroke} />
+            `)}
+          `}>
+          ${({ displayScale }) => html`
+            <rect class="room-rect is-hover" x=${room.rect_x} y=${room.rect_y} width=${room.rect_w} height=${room.rect_h} />
+            <${FloorplanLabel}
+              text=${room.name}
+              fontSize=${labelSize}
+              displayScale=${displayScale}
+              x=${room.rect_x + (labelSize * 0.5) / displayScale}
+              y=${room.rect_y + (labelSize * 1.5) / displayScale}
+            />
             ${(room.walls || []).map((wall) => {
               const key = `wall:${wall.id}`;
               return html`
@@ -156,11 +190,23 @@ export function ReviewView({ projectId, token }) {
                   onClick=${() => select({ type: "wall", id: wall.id })}>
                   <line class=${"wall-line" + (hoverKey === key ? " is-hover" : "")}
                     x1=${wall.ax} y1=${wall.ay} x2=${wall.bx} y2=${wall.by} stroke-width=${stroke} />
-                  <text class="wall-label" font-size=${fs} x=${(wall.ax + wall.bx) / 2} y=${(wall.ay + wall.by) / 2 - stroke}>${wall.name.toUpperCase()}</text>
+                  ${(() => {
+                    const x = (wall.ax + wall.bx) / 2;
+                    const y = (wall.ay + wall.by) / 2 - labelSize / displayScale;
+                    return html`<${FloorplanLabel}
+                      text=${wall.name}
+                      fontSize=${labelSize}
+                      displayScale=${displayScale}
+                      anchor="middle"
+                      className="wall-label"
+                      x=${x}
+                      y=${y}
+                    />`;
+                  })()}
                 </g>`;
             })}
-          </svg>
-        </div>
+          `}
+        <//>
       </section>`;
   }
 

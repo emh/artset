@@ -5,6 +5,7 @@ import { navigate } from "../router.js";
 import { crumbs } from "../store.js";
 import { PlanUploader } from "../components/plan-uploader.js";
 import { RoomEditor } from "../components/room-editor.js";
+import { LucideIcon } from "../components/lucide-icon.js";
 
 function planImageUrl(projectId, fp) {
   return `/api/projects/${projectId}/floorplans/${fp.id}/image?v=${encodeURIComponent(fp.image_key || fp.id)}`;
@@ -26,6 +27,8 @@ export function ProjectView({ id }) {
   const [rooms, setRooms] = useState([]);
   const [loaded, setLoaded] = useState(false);
   const [err, setErr] = useState(null);
+  const [deletePlan, setDeletePlan] = useState(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -46,6 +49,17 @@ export function ProjectView({ id }) {
     return () => { alive = false; };
   }, [id]);
 
+  useEffect(() => {
+    if (!deletePlan) return;
+    const onKeyDown = (e) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      if (!deleteBusy) setDeletePlan(null);
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [deletePlan, deleteBusy]);
+
   if (err) return html`<main><div class="wrap"><div class="empty">
     <p>${err}</p><p class="mt-md"><a class="linkbtn" href="/" data-link>Back to projects</a></p>
   </div></div></main>`;
@@ -53,6 +67,19 @@ export function ProjectView({ id }) {
   if (!loaded) return html`<main><div class="wrap"><p class="spinner">Loading…</p></div></main>`;
 
   const grouped = roomsByFloorplan(rooms);
+
+  async function confirmDeletePlan() {
+    if (!deletePlan) return;
+    setDeleteBusy(true);
+    try {
+      await api.del(`/api/projects/${id}/floorplans/${deletePlan.id}`);
+      setFloorplans((list) => list.filter((fp) => fp.id !== deletePlan.id));
+      setRooms((list) => list.filter((room) => room.floorplan_id !== deletePlan.id));
+      setDeletePlan(null);
+    } finally {
+      setDeleteBusy(false);
+    }
+  }
 
   return html`
     <main>
@@ -67,7 +94,13 @@ export function ProjectView({ id }) {
                     <img src=${planImageUrl(id, fp)} alt=${fp.name || `Floor plan ${index + 1}`} />
                   </a>
                   <div class="floorplan-row-main">
-                    <a class="floorplan-name" href=${`/projects/${id}/floorplans/${fp.id}`} data-link>${fp.name || `Floor plan ${index + 1}`}</a>
+                    <div class="floorplan-row-head">
+                      <a class="floorplan-name" href=${`/projects/${id}/floorplans/${fp.id}`} data-link>${fp.name || `Floor plan ${index + 1}`}</a>
+                      <button class="iconbtn" type="button" title="Delete" aria-label=${`Delete ${fp.name || `Floor plan ${index + 1}`}`}
+                        onClick=${() => setDeletePlan(fp)}>
+                        <${LucideIcon} name="trash-2" />
+                      </button>
+                    </div>
                     ${planRooms.length === 0 && html`<p class="swatch-no">No rooms yet.</p>`}
                     ${planRooms.length > 0 && html`
                       <ol class="floorplan-room-list">
@@ -82,6 +115,19 @@ export function ProjectView({ id }) {
             <${PlanUploader} compact=${true} projectId=${id} onUploaded=${(fp) => setFloorplans((list) => [...list, fp])} />
           </div>
         </div>
+        ${deletePlan && html`
+          <div class="modal-backdrop" role="presentation" onClick=${() => !deleteBusy && setDeletePlan(null)}>
+            <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="floorplan-delete-title" onClick=${(e) => e.stopPropagation()}>
+              <div class="eyebrow">Floor plan</div>
+              <h2 id="floorplan-delete-title">Delete plan</h2>
+              <p class="modal-copy">Delete “${deletePlan.name || "Floor plan"}”? This will remove its rooms, walls, and any placements on those walls.</p>
+              <div class="modal-actions">
+                <button class="btn btn--danger" type="button" disabled=${deleteBusy} onClick=${confirmDeletePlan}>Delete</button>
+                <button class="btn btn--ghost" type="button" disabled=${deleteBusy} onClick=${() => setDeletePlan(null)}>Cancel</button>
+              </div>
+            </div>
+          </div>
+        `}
       </div>
     </main>
   `;

@@ -1,9 +1,13 @@
 import { html } from "htm/preact";
+import { useState } from "preact/hooks";
+import { LucideIcon } from "./lucide-icon.js";
+import { MaximizeModal } from "./maximize-modal.js";
 
 const fits = (start, w, segs) => segs.some((s) => start >= s.start - 0.01 && start + w <= s.end + 0.01);
 
 // Read-only wall elevation for the review/share view.
 export function ReviewElevation({ wall, artImageUrl, selectedPlacementId, onPlacementSelect }) {
+  const [maximized, setMaximized] = useState(false);
   const L = Number(wall.length_inches) || 1;
   const bandH = Number(wall.height_inches) || 108;
   const segments = wall.segments || [];
@@ -16,8 +20,8 @@ export function ReviewElevation({ wall, artImageUrl, selectedPlacementId, onPlac
   if (ticks[ticks.length - 1] < L - step * 0.4) ticks.push(L);
   const artTop = (p) => (bandH - (p.center_height_inches ?? bandH * 0.5)) - p.height_inches / 2;
 
-  return html`
-    <div class="review-elevation" style=${`--wall-aspect:${aspect}`}>
+  function elevationBody(isMaximized = false) {
+    return html`<div class=${"review-elevation" + (isMaximized ? " is-maximized" : "")} style=${`--wall-aspect:${aspect}`}>
       <svg class="elevation review-elevation-wall" viewBox=${`0 0 ${L} ${bandH}`} preserveAspectRatio="xMidYMid meet">
         <rect class="ev-band" x="0" y="0" width=${L} height=${bandH} />
         ${segments.map((s, i) => html`<rect class="ev-usable" key=${i} x=${s.start} y="0" width=${Math.max(0, s.end - s.start)} height=${bandH} />`)}
@@ -44,5 +48,21 @@ export function ReviewElevation({ wall, artImageUrl, selectedPlacementId, onPlac
             </span>`;
         })}
       </div>
+    </div>`;
+  }
+
+  return html`
+    <div>
+      <div class="review-elevation-head">
+        <button class="iconbtn" type="button" title="Maximize" aria-label=${`Maximize ${wall.name} wall elevation`} onClick=${() => setMaximized(true)}>
+          <${LucideIcon} name="expand" />
+        </button>
+      </div>
+      ${elevationBody(false)}
+      ${maximized && html`
+        <${MaximizeModal} title=${wall.name} onClose=${() => setMaximized(false)}>
+          ${elevationBody(true)}
+        <//>
+      `}
     </div>`;
 }

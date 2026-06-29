@@ -4,9 +4,37 @@ import { api } from "../api.js";
 import { navigate } from "../router.js";
 import { FloorplanLabel } from "./floorplan-label.js";
 import { FloorplanViewport } from "./floorplan-viewport.js";
+import { LucideIcon } from "./lucide-icon.js";
 
 function normalize(a, b) {
   return { x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), w: Math.abs(b.x - a.x), h: Math.abs(b.y - a.y) };
+}
+
+function clampRect(rect, W, H) {
+  const x = Math.max(0, Math.min(W, rect.x));
+  const y = Math.max(0, Math.min(H, rect.y));
+  return {
+    x,
+    y,
+    w: Math.max(0, Math.min(W - x, rect.w)),
+    h: Math.max(0, Math.min(H - y, rect.h)),
+  };
+}
+
+function resizeRect(room, corner, point) {
+  const x1 = room.rect_x;
+  const y1 = room.rect_y;
+  const x2 = room.rect_x + room.rect_w;
+  const y2 = room.rect_y + room.rect_h;
+  const nextA = {
+    x: corner.includes("w") ? point.x : x1,
+    y: corner.includes("n") ? point.y : y1,
+  };
+  const nextB = {
+    x: corner.includes("e") ? point.x : x2,
+    y: corner.includes("s") ? point.y : y2,
+  };
+  return normalize(nextA, nextB);
 }
 
 function svgPoint(svg, clientX, clientY) {
@@ -18,7 +46,7 @@ function svgPoint(svg, clientX, clientY) {
 
 export function RoomEditor({ projectId, floorplan, onDeletePlan, sidebarTop }) {
   const W = floorplan.width_px, H = floorplan.height_px;
-  const fs = Math.max(10, Math.round(W * 0.013)); // label size in image units
+  const labelSize = 10;
   const [rooms, setRooms] = useState(null);
   const [draft, setDraft] = useState(null);      // rect being dragged
   const [pending, setPending] = useState(null);  // finalized rect awaiting a name
@@ -30,6 +58,7 @@ export function RoomEditor({ projectId, floorplan, onDeletePlan, sidebarTop }) {
   const svgRef = useRef(null);
   const startRef = useRef(null);
   const draggingRef = useRef(false);
+  const resizeRef = useRef(null);
   const nameRef = useRef(null);
 
   useEffect(() => {
@@ -54,10 +83,41 @@ export function RoomEditor({ projectId, floorplan, onDeletePlan, sidebarTop }) {
     setDraft({ ...startRef.current, w: 0, h: 0 });
   }
   function onMove(e) {
+    if (resizeRef.current) {
+      const edit = resizeRef.current;
+      const next = clampRect(resizeRect(edit.room, edit.corner, toPx(e)), W, H);
+      edit.latest = next;
+      edit.moved = true;
+      setRooms((rs) => (rs || []).map((r) => (
+        r.id === edit.room.id
+          ? { ...r, rect_x: next.x, rect_y: next.y, rect_w: next.w, rect_h: next.h }
+          : r
+      )));
+      return;
+    }
     if (!draggingRef.current) return;
     setDraft(normalize(startRef.current, toPx(e)));
   }
   function onUp(e) {
+    if (resizeRef.current) {
+      const edit = resizeRef.current;
+      resizeRef.current = null;
+      if (edit.moved && edit.latest && edit.latest.w > W * 0.015 && edit.latest.h > H * 0.015) {
+        api.patch(`/api/rooms/${edit.room.id}`, {
+          rect_x: edit.latest.x,
+          rect_y: edit.latest.y,
+          rect_w: edit.latest.w,
+          rect_h: edit.latest.h,
+        }).then(({ room }) => {
+          setRooms((rs) => (rs || []).map((r) => (r.id === room.id ? room : r)));
+        }).catch(() => {
+          setRooms((rs) => (rs || []).map((r) => (r.id === edit.room.id ? edit.room : r)));
+        });
+      } else {
+        setRooms((rs) => (rs || []).map((r) => (r.id === edit.room.id ? edit.room : r)));
+      }
+      return;
+    }
     if (!draggingRef.current) return;
     draggingRef.current = false;
     const d = normalize(startRef.current, toPx(e));
@@ -68,6 +128,14 @@ export function RoomEditor({ projectId, floorplan, onDeletePlan, sidebarTop }) {
       const r = e.currentTarget.closest(".floorplan-viewport-frame").getBoundingClientRect();
       setPop({ left: e.clientX - r.left, top: e.clientY - r.top });
     }
+  }
+
+  function onResizeDown(e, room, corner) {
+    if (pending) return;
+    e.preventDefault();
+    e.stopPropagation();
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch {}
+    resizeRef.current = { room, corner, latest: null, moved: false };
   }
 
   async function commit() {
@@ -142,21 +210,52 @@ export function RoomEditor({ projectId, floorplan, onDeletePlan, sidebarTop }) {
                 onInput=${(e) => setNameVal(e.target.value)}
                 onKeyDown=${(e) => { if (e.key === "Enter") commit(); if (e.key === "Escape") cancelPending(); }} />
               <button class="linkbtn" onClick=${commit}>Add</button>
-              <button class="linkbtn muted" onClick=${cancelPending}>✕</button>
+              <button class="iconbtn" type="button" title="Close" aria-label="Cancel room naming" onClick=${cancelPending}>
+                <${LucideIcon} name="x" />
+              </button>
             </div>
           `}>
-          <g onPointerDown=${onDown} onPointerMove=${onMove} onPointerUp=${onUp}>
+          ${({ displayScale }) => html`<g onPointerDown=${onDown} onPointerMove=${onMove} onPointerUp=${onUp}>
             <rect class="floorplan-hit" x="0" y="0" width=${W} height=${H} />
-            ${(rooms || []).map((r) => html`
-              <g key=${r.id} onMouseEnter=${() => setHoverId(r.id)} onMouseLeave=${() => setHoverId(null)}>
+            ${(rooms || []).map((r) => {
+              const handle = Math.max(8 / displayScale, Math.min(r.rect_w, r.rect_h) * 0.04);
+              const handles = [
+                ["nw", r.rect_x, r.rect_y],
+                ["ne", r.rect_x + r.rect_w, r.rect_y],
+                ["sw", r.rect_x, r.rect_y + r.rect_h],
+                ["se", r.rect_x + r.rect_w, r.rect_y + r.rect_h],
+              ];
+              return html`
+              <g key=${r.id}
+                style="cursor:pointer"
+                onMouseEnter=${() => setHoverId(r.id)}
+                onMouseLeave=${() => setHoverId(null)}
+                onPointerDown=${(e) => e.stopPropagation()}
+                onClick=${() => navigate(`/projects/${projectId}/rooms/${r.id}`)}>
                 <rect class=${"room-rect" + (hoverId === r.id ? " is-hover" : "")}
                   x=${r.rect_x} y=${r.rect_y} width=${r.rect_w} height=${r.rect_h} />
-                <${FloorplanLabel} text=${r.name} fontSize=${fs} x=${r.rect_x + fs * 0.5} y=${r.rect_y + fs * 1.5} />
+                <${FloorplanLabel}
+                  text=${r.name}
+                  fontSize=${labelSize}
+                  displayScale=${displayScale}
+                  x=${r.rect_x + (labelSize * 0.5) / displayScale}
+                  y=${r.rect_y + (labelSize * 1.5) / displayScale}
+                />
+                ${handles.map(([corner, x, y]) => html`
+                  <rect class=${`room-resize-handle room-resize-handle--${corner}`}
+                    key=${corner}
+                    x=${x - handle / 2}
+                    y=${y - handle / 2}
+                    width=${handle}
+                    height=${handle}
+                    onPointerDown=${(e) => onResizeDown(e, r, corner)}
+                    onClick=${(e) => e.stopPropagation()} />
+                `)}
               </g>
-            `)}
+            `})}
             ${draft && html`<rect class="room-draft" x=${draft.x} y=${draft.y} width=${draft.w} height=${draft.h} />`}
             ${pending && html`<rect class="room-draft" x=${pending.x} y=${pending.y} width=${pending.w} height=${pending.h} />`}
-          </g>
+          </g>`}
         <//>
         <p style="margin-top:12px"><button class="linkbtn muted" onClick=${() => setDialog({ type: "delete-plan" })}>Delete plan</button></p>
       </div>

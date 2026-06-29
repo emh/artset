@@ -3,13 +3,22 @@ import { useState, useRef, useEffect } from "preact/hooks";
 import { api } from "../api.js";
 import { navigate } from "../router.js";
 import { crumbs } from "../store.js";
+import { FloorplanLabel } from "../components/floorplan-label.js";
 import { FloorplanViewport } from "../components/floorplan-viewport.js";
+import { LucideIcon } from "../components/lucide-icon.js";
 
 function svgPoint(svg, clientX, clientY) {
   const pt = svg.createSVGPoint();
   pt.x = clientX; pt.y = clientY;
   const p = pt.matrixTransform(svg.getScreenCTM().inverse());
   return { x: p.x, y: p.y };
+}
+
+function clampPoint(point, viewBox) {
+  return {
+    x: Math.max(viewBox.x, Math.min(viewBox.x + viewBox.w, point.x)),
+    y: Math.max(viewBox.y, Math.min(viewBox.y + viewBox.h, point.y)),
+  };
 }
 
 export function RoomView({ projectId, roomId }) {
@@ -32,6 +41,7 @@ export function RoomView({ projectId, roomId }) {
   const startRef = useRef(null);
   const draggingRef = useRef(false);
   const downClientRef = useRef(null);
+  const endpointRef = useRef(null);
   const nameRef = useRef(null);
 
   useEffect(() => {
@@ -73,7 +83,7 @@ export function RoomView({ projectId, roomId }) {
   const pad = 0.08 * Math.max(room.rect_w, room.rect_h);
   const vb = { x: room.rect_x - pad, y: room.rect_y - pad, w: room.rect_w + 2 * pad, h: room.rect_h + 2 * pad };
   const stroke = Math.max(4, Math.min(room.rect_w, room.rect_h) * 0.02);
-  const fs = Math.max(8, vb.w * 0.025);
+  const labelSize = 10;
 
   function onDown(e) {
     if (pending) return;
@@ -86,11 +96,39 @@ export function RoomView({ projectId, roomId }) {
     setDraft({ ax: p.x, ay: p.y, bx: p.x, by: p.y });
   }
   function onMove(e) {
+    if (endpointRef.current) {
+      const edit = endpointRef.current;
+      const p = clampPoint(svgPoint(svgRef.current, e.clientX, e.clientY), vb);
+      edit.moved = true;
+      edit.latest = p;
+      setWalls((ws) => (ws || []).map((w) => {
+        if (w.id !== edit.wall.id) return w;
+        return edit.endpoint === "a" ? { ...w, ax: p.x, ay: p.y } : { ...w, bx: p.x, by: p.y };
+      }));
+      return;
+    }
     if (!draggingRef.current) return;
     const p = svgPoint(svgRef.current, e.clientX, e.clientY);
     setDraft(snap(startRef.current, p));
   }
   function onUp(e) {
+    if (endpointRef.current) {
+      const edit = endpointRef.current;
+      endpointRef.current = null;
+      if (edit.moved && edit.latest) {
+        const patch = edit.endpoint === "a"
+          ? { ax: edit.latest.x, ay: edit.latest.y }
+          : { bx: edit.latest.x, by: edit.latest.y };
+        api.patch(`/api/walls/${edit.wall.id}`, patch).then(({ wall }) => {
+          setWalls((ws) => (ws || []).map((w) => (w.id === wall.id ? wall : w)));
+        }).catch(() => {
+          setWalls((ws) => (ws || []).map((w) => (w.id === edit.wall.id ? edit.wall : w)));
+        });
+      } else {
+        setWalls((ws) => (ws || []).map((w) => (w.id === edit.wall.id ? edit.wall : w)));
+      }
+      return;
+    }
     if (!draggingRef.current) return;
     draggingRef.current = false;
     const p = svgPoint(svgRef.current, e.clientX, e.clientY);
@@ -103,6 +141,14 @@ export function RoomView({ projectId, roomId }) {
     setLenVal("");
     const wr = e.currentTarget.closest(".floorplan-viewport-frame").getBoundingClientRect();
     setPop({ left: ((e.clientX + downClientRef.current.x) / 2) - wr.left, top: ((e.clientY + downClientRef.current.y) / 2) - wr.top });
+  }
+
+  function onEndpointDown(e, wall, endpoint) {
+    if (pending) return;
+    e.preventDefault();
+    e.stopPropagation();
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch {}
+    endpointRef.current = { wall, endpoint, latest: null, moved: false };
   }
 
   async function commit() {
@@ -168,24 +214,52 @@ export function RoomView({ projectId, roomId }) {
             onInput=${(e) => setLenVal(e.target.value)}
             onKeyDown=${(e) => { if (e.key === "Enter") commit(); if (e.key === "Escape") cancelPending(); }} />
           <button class="linkbtn" onClick=${commit}>Add</button>
-          <button class="linkbtn muted" onClick=${cancelPending}>✕</button>
+          <button class="iconbtn" type="button" title="Close" aria-label="Cancel wall naming" onClick=${cancelPending}>
+            <${LucideIcon} name="x" />
+          </button>
         </div>
       `}>
-      <g onPointerDown=${onDown} onPointerMove=${onMove} onPointerUp=${onUp}>
+      ${({ displayScale }) => html`<g onPointerDown=${onDown} onPointerMove=${onMove} onPointerUp=${onUp}>
         <rect class="floorplan-hit" x=${vb.x} y=${vb.y} width=${vb.w} height=${vb.h} />
         <rect class="room-rect" x=${room.rect_x} y=${room.rect_y} width=${room.rect_w} height=${room.rect_h} fill="none" />
         ${(walls || []).map((w) => html`
           <g key=${w.id} onMouseEnter=${() => setHoverId(w.id)} onMouseLeave=${() => setHoverId(null)} style="cursor:pointer"
              onPointerDown=${(e) => e.stopPropagation()}
              onClick=${() => navigate(`/projects/${projectId}/rooms/${roomId}/walls/${w.id}`)}>
+            <line class="wall-line-hit" x1=${w.ax} y1=${w.ay} x2=${w.bx} y2=${w.by}
+              stroke-width=${Math.max(stroke, 18 / displayScale)} />
             <line class=${"wall-line" + (hoverId === w.id ? " is-hover" : "")} x1=${w.ax} y1=${w.ay} x2=${w.bx} y2=${w.by}
               stroke-width=${stroke} />
-            <text class="wall-label" font-size=${fs} x=${(w.ax + w.bx) / 2} y=${(w.ay + w.by) / 2 - stroke}>${w.name.toUpperCase()}</text>
+            ${(() => {
+              const x = (w.ax + w.bx) / 2;
+              const y = (w.ay + w.by) / 2 - labelSize / displayScale;
+              return html`<${FloorplanLabel}
+                text=${w.name}
+                fontSize=${labelSize}
+                displayScale=${displayScale}
+                anchor="middle"
+                className="wall-label"
+                x=${x}
+                y=${y}
+              />`;
+            })()}
+            ${[
+              ["a", w.ax, w.ay],
+              ["b", w.bx, w.by],
+            ].map(([endpoint, x, y]) => html`
+              <circle class="wall-endpoint-handle"
+                key=${endpoint}
+                cx=${x}
+                cy=${y}
+                r=${Math.max(5 / displayScale, stroke * 0.55)}
+                onPointerDown=${(e) => onEndpointDown(e, w, endpoint)}
+                onClick=${(e) => e.stopPropagation()} />
+            `)}
           </g>
         `)}
         ${draft && html`<line class="wall-draft" x1=${draft.ax} y1=${draft.ay} x2=${draft.bx} y2=${draft.by} stroke-width=${stroke} />`}
         ${pending && html`<line class="wall-draft" x1=${pending.ax} y1=${pending.ay} x2=${pending.bx} y2=${pending.by} stroke-width=${stroke} />`}
-      </g>
+      </g>`}
     <//>`;
 
   const sidebar = html`

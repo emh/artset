@@ -4,6 +4,8 @@ import { api } from "../api.js";
 import { crumbs } from "../store.js";
 import { navigate } from "../router.js";
 import { FloorplanLabel } from "../components/floorplan-label.js";
+import { LucideIcon } from "../components/lucide-icon.js";
+import { MaximizeModal } from "../components/maximize-modal.js";
 
 const blankDraft = () => ({ titleDescription: "", dimensions: "", customValues: {}, file: null, preview: "", error: "" });
 const inch = (n) => `${Math.round(Number(n) || 0)}"`;
@@ -65,6 +67,7 @@ export function ArtView({ projectId }) {
   const [draft, setDraft] = useState(blankDraft());
   const [saving, setSaving] = useState({});
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [previewArt, setPreviewArt] = useState(null);
   const [editingDims, setEditingDims] = useState(null);
   const [editingColumn, setEditingColumn] = useState(null);
   const [hoverHeader, setHoverHeader] = useState(false);
@@ -127,16 +130,17 @@ export function ArtView({ projectId }) {
     setPlacementPan((p) => clampPlacementPan(p));
   }, [placementZoom, placementViewport.w, placementViewport.h]);
   useEffect(() => {
-    if (!deleteTarget && !placementTarget) return;
+    if (!deleteTarget && !placementTarget && !previewArt) return;
     const onKeyDown = (e) => {
       if (e.key !== "Escape") return;
       e.preventDefault();
       if (placementTarget) closePlacementPicker();
+      else if (previewArt) setPreviewArt(null);
       else setDeleteTarget(null);
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [deleteTarget, placementTarget]);
+  }, [deleteTarget, placementTarget, previewArt]);
 
   async function refresh() {
     const { art } = await api.get(`/api/projects/${projectId}/art`);
@@ -439,18 +443,27 @@ export function ArtView({ projectId }) {
   }
 
   function imageCell(p) {
+    const imageUrl = `/api/art/${p.id}/image?v=${encodeURIComponent(p.image_v || "")}`;
     return html`
-      <button class="art-sheet-image" type="button"
-        onClick=${() => fileRefs.current[p.id] && fileRefs.current[p.id].click()}
-        onDragOver=${(e) => e.preventDefault()}
-        onDrop=${(e) => {
-          e.preventDefault();
-          setPieceImage(p, e.dataTransfer.files[0]);
-        }}>
-        ${p.has_image
-          ? html`<img src=${`/api/art/${p.id}/image?v=${encodeURIComponent(p.image_v || "")}`} alt=${p.title} loading="lazy" />`
-          : html`<span>Drop image</span>`}
-      </button>
+      <div class="art-thumb-wrap">
+        <button class="art-sheet-image" type="button"
+          onClick=${() => fileRefs.current[p.id] && fileRefs.current[p.id].click()}
+          onDragOver=${(e) => e.preventDefault()}
+          onDrop=${(e) => {
+            e.preventDefault();
+            setPieceImage(p, e.dataTransfer.files[0]);
+          }}>
+          ${p.has_image
+            ? html`<img src=${imageUrl} alt=${p.title} loading="lazy" />`
+            : html`<span>Drop image</span>`}
+        </button>
+        ${p.has_image && html`
+          <button class="iconbtn art-thumb-expand" type="button" title="Maximize" aria-label=${`Preview ${p.title || "art image"}`}
+            onClick=${() => setPreviewArt({ ...p, imageUrl })}>
+            <${LucideIcon} name="expand" />
+          </button>
+        `}
+      </div>
       <input ref=${(el) => { fileRefs.current[p.id] = el; }} type="file" accept="image/*" style="display:none"
         onChange=${(e) => setPieceImage(p, e.target.files[0])} />`;
   }
@@ -549,7 +562,9 @@ export function ArtView({ projectId }) {
                     }} />
                   <button class="art-delete-column" type="button" title="Delete column" aria-label=${column.name ? `Delete ${column.name} column` : "Delete column"}
                     onPointerDown=${(e) => { e.preventDefault(); deleteColumn(column.id); }}
-                    onClick=${() => deleteColumn(column.id)}>X</button>
+                    onClick=${() => deleteColumn(column.id)}>
+                    <${LucideIcon} name="trash-2" />
+                  </button>
                 </div>`)}
             </div>
 
@@ -636,11 +651,21 @@ export function ArtView({ projectId }) {
                 onMouseLeave=${hideRowControlsSoon}>
                 <button class=${"wall-span-delete art-row-delete" + (hoverRow === p.id ? " is-visible" : "")} type="button"
                   aria-label=${`Delete ${p.title}`}
-                  onClick=${() => setDeleteTarget(p)}>X</button>
+                  onClick=${() => setDeleteTarget(p)}>
+                  <${LucideIcon} name="trash-2" />
+                </button>
               </div>`)}
           </div>
         </div>
       </div>
+
+      ${previewArt && html`
+        <${MaximizeModal} title=${previewArt.title || "Art image"} onClose=${() => setPreviewArt(null)}>
+          <div class="art-preview-modal">
+            <img src=${previewArt.imageUrl} alt=${previewArt.title || "Art image"} />
+          </div>
+        <//>
+      `}
 
       ${deleteTarget && html`
         <div class="modal-backdrop" onClick=${() => setDeleteTarget(null)}>
@@ -670,8 +695,12 @@ export function ArtView({ projectId }) {
                 return html`
                   <div class="art-placement-tools">
                     <div class="zoom-controls" aria-label="Floor plan zoom controls">
-                      <button class="iconbtn" type="button" title="Zoom out" aria-label="Zoom out floor plan" disabled=${placementZoom <= 1.01} onClick=${() => zoomPlacementBy(-0.25)}>-</button>
-                      <button class="iconbtn" type="button" title="Zoom in" aria-label="Zoom in floor plan" disabled=${placementZoom >= 2.99} onClick=${() => zoomPlacementBy(0.25)}>+</button>
+                      <button class="iconbtn" type="button" title="Zoom out" aria-label="Zoom out floor plan" disabled=${placementZoom <= 1.01} onClick=${() => zoomPlacementBy(-0.25)}>
+                        <${LucideIcon} name="zoom-out" />
+                      </button>
+                      <button class="iconbtn" type="button" title="Zoom in" aria-label="Zoom in floor plan" disabled=${placementZoom >= 2.99} onClick=${() => zoomPlacementBy(0.25)}>
+                        <${LucideIcon} name="zoom-in" />
+                      </button>
                     </div>
                   </div>
                   <div ref=${placementPlanRef}

@@ -1,5 +1,7 @@
 import { html } from "htm/preact";
 import { useEffect, useRef, useState } from "preact/hooks";
+import { LucideIcon } from "./lucide-icon.js";
+import { MaximizeModal } from "./maximize-modal.js";
 
 function normalizeViewBox(viewBox) {
   if (!viewBox) return { x: 0, y: 0, w: 1, h: 1 };
@@ -21,6 +23,64 @@ export function FloorplanViewport({
   children,
   overlay,
   renderMiniContent,
+  title = "Floor plan",
+  canMaximize = true,
+}) {
+  const [maximized, setMaximized] = useState(false);
+
+  return html`
+    <${FloorplanSurface}
+      width=${width}
+      height=${height}
+      viewBox=${viewBox}
+      imageHref=${imageHref}
+      svgRef=${svgRef}
+      className=${className}
+      ariaLabel=${ariaLabel}
+      title=${title}
+      canMaximize=${canMaximize}
+      onMaximize=${() => setMaximized(true)}
+      overlay=${maximized ? null : overlay}
+      renderMiniContent=${renderMiniContent}>
+      ${children}
+    <//>
+    ${maximized && html`
+      <${MaximizeModal} title=${title} onClose=${() => setMaximized(false)}>
+        <${FloorplanSurface}
+          width=${width}
+          height=${height}
+          viewBox=${viewBox}
+          imageHref=${imageHref}
+          svgRef=${svgRef}
+          className=${className}
+          ariaLabel=${ariaLabel}
+          title=${title}
+          isMaximized=${true}
+          canMaximize=${false}
+          overlay=${overlay}
+          renderMiniContent=${renderMiniContent}>
+          ${children}
+        <//>
+      <//>
+    `}
+  `;
+}
+
+function FloorplanSurface({
+  width,
+  height,
+  viewBox,
+  imageHref,
+  svgRef,
+  className = "",
+  ariaLabel = "Floor plan",
+  title = "Floor plan",
+  children,
+  overlay,
+  renderMiniContent,
+  onMaximize,
+  canMaximize = true,
+  isMaximized = false,
 }) {
   const vb = normalizeViewBox(viewBox);
   const frameRef = useRef(null);
@@ -32,7 +92,9 @@ export function FloorplanViewport({
 
   const aspect = vb.w > 0 && vb.h > 0 ? vb.w / vb.h : 1;
   const targetH = viewport.w
-    ? Math.max(220, Math.min(viewport.w / aspect, Math.max(260, viewport.windowH - 280), 720))
+    ? isMaximized
+      ? Math.max(260, Math.min(viewport.w / aspect, Math.max(260, viewport.windowH - 170)))
+      : Math.max(220, Math.min(viewport.w / aspect, Math.max(260, viewport.windowH - 280), 720))
     : 0;
 
   const baseScale = viewport.w && targetH ? Math.min(viewport.w / vb.w, targetH / vb.h) : 1;
@@ -136,14 +198,24 @@ export function FloorplanViewport({
   const visibleH = baseScale && zoom ? Math.min(vb.h, targetH / (baseScale * zoom)) : vb.h;
   const visibleX = Math.max(vb.x, Math.min(vb.x + vb.w - visibleW, vb.x + vb.w / 2 - visibleW / 2 - pan.x / (baseScale * zoom)));
   const visibleY = Math.max(vb.y, Math.min(vb.y + vb.h - visibleH, vb.y + vb.h / 2 - visibleH / 2 - pan.y / (baseScale * zoom)));
+  const renderContext = { displayScale: baseScale * zoom, zoom, baseScale };
 
   return html`
-    <div class="floorplan-viewport">
+    <div class=${"floorplan-viewport" + (isMaximized ? " is-maximized" : "")}>
       <div class="floorplan-viewport-head">
         <div class="zoom-controls" aria-label="Floor plan zoom controls">
-          <button class="iconbtn" type="button" title="Zoom out" aria-label="Zoom out floor plan" disabled=${zoom <= 1.01} onClick=${() => zoomBy(-0.25)}>-</button>
-          <button class="iconbtn" type="button" title="Zoom in" aria-label="Zoom in floor plan" disabled=${zoom >= 2.99} onClick=${() => zoomBy(0.25)}>+</button>
+          <button class="iconbtn" type="button" title="Zoom out" aria-label="Zoom out floor plan" disabled=${zoom <= 1.01} onClick=${() => zoomBy(-0.25)}>
+            <${LucideIcon} name="zoom-out" />
+          </button>
+          <button class="iconbtn" type="button" title="Zoom in" aria-label="Zoom in floor plan" disabled=${zoom >= 2.99} onClick=${() => zoomBy(0.25)}>
+            <${LucideIcon} name="zoom-in" />
+          </button>
         </div>
+        ${canMaximize && html`
+          <button class="iconbtn" type="button" title="Maximize" aria-label=${`Maximize ${title}`} onClick=${onMaximize}>
+            <${LucideIcon} name="expand" />
+          </button>
+        `}
       </div>
       <div ref=${frameRef}
         class=${"floorplan-viewport-frame" + (canPan ? " can-pan" : "")}
@@ -160,7 +232,7 @@ export function FloorplanViewport({
           preserveAspectRatio="xMidYMid meet"
           aria-label=${ariaLabel}>
           <image href=${imageHref} x="0" y="0" width=${width} height=${height} preserveAspectRatio="none" />
-          ${typeof children === "function" ? children() : children}
+          ${typeof children === "function" ? children(renderContext) : children}
         </svg>
         ${overlay}
       </div>

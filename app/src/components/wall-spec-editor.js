@@ -2,6 +2,7 @@ import { html } from "htm/preact";
 import { Fragment } from "preact";
 import { useState, useRef, useEffect } from "preact/hooks";
 import { api } from "../api.js";
+import { LucideIcon } from "./lucide-icon.js";
 
 const MINW = 2; // min usable span width, inches
 
@@ -71,6 +72,7 @@ export function WallSpecEditor({ wall, projectId, placeArtId, onChange }) {
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [viewport, setViewport] = useState({ w: 0, h: 0 });
   const [hoverSpan, setHoverSpan] = useState(null);
+  const [maximized, setMaximized] = useState(false);
 
   const svgRef = useRef(null);
   const viewportRef = useRef(null);
@@ -93,7 +95,9 @@ export function WallSpecEditor({ wall, projectId, placeArtId, onChange }) {
   const rulerLabelSize = 10;
   const rulerLabelY = 12;
   const canPan = zoom > 1.01;
-  const maxRendererH = Math.max(120, Math.min(640, (viewport.windowH || 720) - 330));
+  const maxRendererH = maximized
+    ? Math.max(180, (viewport.windowH || 720) - 220)
+    : Math.max(120, Math.min(640, (viewport.windowH || 720) - 330));
   const baseScale = viewport.w ? Math.min(viewport.w / L, maxRendererH / bandH) : 0;
   const baseWallW = L * baseScale;
   const baseWallH = bandH * baseScale;
@@ -147,10 +151,21 @@ export function WallSpecEditor({ wall, projectId, placeArtId, onChange }) {
       ro.disconnect();
       window.removeEventListener("resize", measure);
     };
-  }, []);
+  }, [maximized]);
   useEffect(() => {
     setPan((p) => clampPan(p));
   }, [zoom, viewport.w, viewport.h, viewport.windowH, L, bandH]);
+
+  useEffect(() => {
+    if (!maximized) return;
+    const onKeyDown = (e) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      setMaximized(false);
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [maximized]);
 
   useEffect(() => {
     api.get(`/api/walls/${wall.id}/placements`).then((d) => setPlace(d.placements)).catch(() => {});
@@ -449,12 +464,22 @@ export function WallSpecEditor({ wall, projectId, placeArtId, onChange }) {
   return html`
     <${Fragment}>
       <div class="workspace">
-        <div>
+        <div class=${"wall-editor-stage" + (maximized ? " is-maximized" : "")} role=${maximized ? "dialog" : null} aria-modal=${maximized ? "true" : null} aria-label=${maximized ? `${name} expanded wall editor` : null}>
         <div class="wall-render-head">
           <div class="zoom-controls" aria-label="Zoom controls">
-            <button class="iconbtn" type="button" title="Zoom out" aria-label="Zoom out" disabled=${zoom <= 1.01} onClick=${() => zoomBy(-0.25)}>-</button>
-            <button class="iconbtn" type="button" title="Zoom in" aria-label="Zoom in" disabled=${zoom >= 2.99} onClick=${() => zoomBy(0.25)}>+</button>
+            <button class="iconbtn" type="button" title="Zoom out" aria-label="Zoom out" disabled=${zoom <= 1.01} onClick=${() => zoomBy(-0.25)}>
+              <${LucideIcon} name="zoom-out" />
+            </button>
+            <button class="iconbtn" type="button" title="Zoom in" aria-label="Zoom in" disabled=${zoom >= 2.99} onClick=${() => zoomBy(0.25)}>
+              <${LucideIcon} name="zoom-in" />
+            </button>
           </div>
+          <button class="iconbtn" type="button"
+            title=${maximized ? "Close expanded view" : "Maximize"}
+            aria-label=${maximized ? "Close expanded wall editor" : "Maximize wall editor"}
+            onClick=${() => setMaximized((v) => !v)}>
+            <${LucideIcon} name=${maximized ? "x" : "expand"} />
+          </button>
         </div>
         <div ref=${viewportRef} class=${"wall-renderer" + (canPan ? " can-pan" : "")}
           style=${rendererH ? `height:${rendererH}px` : ""}
@@ -527,7 +552,7 @@ export function WallSpecEditor({ wall, projectId, placeArtId, onChange }) {
                   aria-label=${`Delete ${Math.round(s.end - s.start)} inch usable span`}
                   onPointerDown=${(e) => { e.stopPropagation(); }}
                   onClick=${(e) => { e.stopPropagation(); removeSpan(i); }}>
-                  X
+                  <${LucideIcon} name="trash-2" />
                 </button>
                 <span class="wall-span-label">
                   ${Math.round(s.end - s.start)}″
@@ -563,7 +588,7 @@ export function WallSpecEditor({ wall, projectId, placeArtId, onChange }) {
                 }}
                 onPointerDown=${(e) => { e.stopPropagation(); }}
                 onClick=${(e) => { e.stopPropagation(); removePlacement(p.id); }}>
-                X
+                <${LucideIcon} name="trash-2" />
               </button>`;
           })}
         </div>
