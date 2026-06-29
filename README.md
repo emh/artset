@@ -188,7 +188,15 @@ sign in again); the local D1 data persists on disk.
 | `npm run migrate:remote` | apply migrations to the production DB |
 | `npm run prod:studios:list` | list production studios with user/project/art counts |
 | `npm run prod:studios:delete -- "Exact Studio Name"` | delete one production studio, including users, projects, art, floor plans, and uploaded images |
+| `npm run sample-art:web -- --count 24 --out ./sample-art` | download nature/architecture demo images from the web and write `manifest.json` |
+| `npm run prod:art:upload -- --studio "Exact Studio Name" --dir ./sample-art --project-id proj_...` | upload a manifest-backed sample art folder to a production project |
 | `npm run deploy` | `wrangler deploy` to production |
+
+Sample art upload expects a folder with image files and a manifest. The web sample script
+creates that format automatically from public Wikimedia Commons image search with no API key.
+If the image host throttles a larger run, rerun with `--delay-ms 1500` or higher.
+The upload script defaults to a production project named `Sample Art` and creates it if
+needed. Use `--project-id proj_...` or `--project "Project Name"` to choose a different target.
 
 ---
 

@@ -9,7 +9,9 @@
     "migrate:local": "wrangler d1 migrations apply artset-db --local",
     "migrate:remote": "wrangler d1 migrations apply artset-db --remote",
     "prod:studios:list": "node scripts/prod-studios.mjs list",
-    "prod:studios:delete": "node scripts/prod-studios.mjs delete"
+    "prod:studios:delete": "node scripts/prod-studios.mjs delete",
+    "prod:art:upload": "node scripts/prod-upload-art.mjs",
+    "sample-art:web": "node scripts/download-web-samples.mjs"
   },
   "devDependencies": {
     "wrangler": "^4.105.0"
