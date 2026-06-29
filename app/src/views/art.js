@@ -72,7 +72,8 @@ export function ArtView({ projectId }) {
   const [editingColumn, setEditingColumn] = useState(null);
   const [hoverHeader, setHoverHeader] = useState(false);
   const [hoverRow, setHoverRow] = useState(null);
-  const [floorplan, setFloorplan] = useState(null);
+  const [floorplans, setFloorplans] = useState([]);
+  const [selectedFloorplanId, setSelectedFloorplanId] = useState(null);
   const [placementTarget, setPlacementTarget] = useState(null);
   const [rooms, setRooms] = useState(null);
   const [wallsByRoom, setWallsByRoom] = useState({});
@@ -94,11 +95,14 @@ export function ArtView({ projectId }) {
   const rowHoverTimer = useRef(null);
   const focusedColumnRef = useRef(null);
   const canceledColumnRefs = useRef(new Set());
+  const selectedFloorplan = floorplans.find((fp) => fp.id === selectedFloorplanId) || floorplans[0] || null;
 
   useEffect(() => {
     api.get(`/api/projects/${projectId}`).then((d) => {
       setProject(d.project);
-      setFloorplan(d.floorplan || null);
+      const plans = d.floorplans || (d.floorplan ? [d.floorplan] : []);
+      setFloorplans(plans);
+      setSelectedFloorplanId((current) => plans.some((fp) => fp.id === current) ? current : (plans[0] && plans[0].id) || null);
       crumbs.value = [{ label: d.project.name, href: `/projects/${projectId}` }];
     }).catch(() => {});
     refresh();
@@ -119,13 +123,13 @@ export function ArtView({ projectId }) {
   }, [editingColumn, draftColumnId]);
   useEffect(() => {
     const el = placementPlanRef.current;
-    if (!el || !placementTarget || !floorplan) return;
+    if (!el || !placementTarget || !selectedFloorplan) return;
     const measure = () => setPlacementViewport({ w: el.clientWidth, h: el.clientHeight });
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [placementTarget, floorplan, selectedRoomId]);
+  }, [placementTarget, selectedFloorplan && selectedFloorplan.id, selectedRoomId]);
   useEffect(() => {
     setPlacementPan((p) => clampPlacementPan(p));
   }, [placementZoom, placementViewport.w, placementViewport.h]);
@@ -396,6 +400,7 @@ export function ArtView({ projectId }) {
 
   async function openPlacementPicker(p) {
     setPlacementTarget(p);
+    setSelectedFloorplanId((current) => floorplans.some((fp) => fp.id === current) ? current : (floorplans[0] && floorplans[0].id) || null);
     setSelectedRoomId(null);
     setHoverRoomId(null);
     setHoverWallId(null);
@@ -414,7 +419,16 @@ export function ArtView({ projectId }) {
     resetPlacementView();
   }
 
+  function selectPlacementFloorplan(floorplanId) {
+    setSelectedFloorplanId(floorplanId);
+    setSelectedRoomId(null);
+    setHoverRoomId(null);
+    setHoverWallId(null);
+    resetPlacementView();
+  }
+
   async function chooseRoom(room) {
+    if (selectedFloorplan && room.floorplan_id !== selectedFloorplan.id) return;
     setSelectedRoomId(room.id);
     setHoverRoomId(room.id);
     resetPlacementView();
@@ -682,59 +696,83 @@ export function ArtView({ projectId }) {
         <div class="modal-backdrop" onClick=${closePlacementPicker}>
           <div class="modal-panel art-placement-modal" role="dialog" aria-modal="true" aria-labelledby="art-placement-title" onClick=${(e) => e.stopPropagation()}>
             <h2 id="art-placement-title">Place art</h2>
-            ${!floorplan && html`<p class="swatch-no" style="margin-top:22px">Upload a floor plan before placing art.</p>`}
-            ${floorplan && html`
+            ${!selectedFloorplan && html`<p class="swatch-no" style="margin-top:22px">Upload a floor plan before placing art.</p>`}
+            ${selectedFloorplan && html`
               ${(() => {
-                const selectedRoom = (rooms || []).find((r) => r.id === selectedRoomId);
+                const roomsForPlan = (rooms || []).filter((room) => room.floorplan_id === selectedFloorplan.id);
+                const selectedRoom = roomsForPlan.find((r) => r.id === selectedRoomId);
                 const pad = selectedRoom ? Math.max(selectedRoom.rect_w, selectedRoom.rect_h) * 0.08 : 0;
                 const viewBox = selectedRoom
                   ? `${selectedRoom.rect_x - pad} ${selectedRoom.rect_y - pad} ${selectedRoom.rect_w + pad * 2} ${selectedRoom.rect_h + pad * 2}`
-                  : `0 0 ${floorplan.width_px} ${floorplan.height_px}`;
+                  : `0 0 ${selectedFloorplan.width_px} ${selectedFloorplan.height_px}`;
                 const wallStroke = selectedRoom ? Math.max(4, Math.min(selectedRoom.rect_w, selectedRoom.rect_h) * 0.02) : 4;
                 const walls = selectedRoom ? (wallsByRoom[selectedRoom.id] || []) : [];
+                const planImageUrl = `/api/projects/${projectId}/floorplans/${selectedFloorplan.id}/image?v=${encodeURIComponent(selectedFloorplan.image_key || selectedFloorplan.id)}`;
                 return html`
-                  <div class="art-placement-tools">
-                    <div class="zoom-controls" aria-label="Floor plan zoom controls">
-                      <button class="iconbtn" type="button" title="Zoom out" aria-label="Zoom out floor plan" disabled=${placementZoom <= 1.01} onClick=${() => zoomPlacementBy(-0.25)}>
-                        <${LucideIcon} name="zoom-out" />
-                      </button>
-                      <button class="iconbtn" type="button" title="Zoom in" aria-label="Zoom in floor plan" disabled=${placementZoom >= 2.99} onClick=${() => zoomPlacementBy(0.25)}>
-                        <${LucideIcon} name="zoom-in" />
-                      </button>
+                  <div class="art-placement-layout">
+                    <aside class="art-placement-plans" aria-label="Floor plans">
+                      ${floorplans.map((fp, index) => html`
+                        <button class=${"art-placement-plan-thumb" + (selectedFloorplan.id === fp.id ? " is-selected" : "")}
+                          type="button"
+                          key=${fp.id}
+                          aria-label=${`Select ${fp.name || `Floor plan ${index + 1}`}`}
+                          onClick=${() => selectPlacementFloorplan(fp.id)}>
+                          <img src=${`/api/projects/${projectId}/floorplans/${fp.id}/image?v=${encodeURIComponent(fp.image_key || fp.id)}`} alt=${fp.name || `Floor plan ${index + 1}`} />
+                          <span>${fp.name || `Floor plan ${index + 1}`}</span>
+                        </button>
+                      `)}
+                    </aside>
+                    <div class="art-placement-main">
+                      <div class="art-placement-tools">
+                        <div class="zoom-controls" aria-label="Floor plan zoom controls">
+                          <button class="iconbtn" type="button" title="Zoom out" aria-label="Zoom out floor plan" disabled=${placementZoom <= 1.01} onClick=${() => zoomPlacementBy(-0.25)}>
+                            <${LucideIcon} name="zoom-out" />
+                          </button>
+                          <button class="iconbtn" type="button" title="Zoom in" aria-label="Zoom in floor plan" disabled=${placementZoom >= 2.99} onClick=${() => zoomPlacementBy(0.25)}>
+                            <${LucideIcon} name="zoom-in" />
+                          </button>
+                        </div>
+                      </div>
+                      <div ref=${placementPlanRef}
+                        class=${"art-placement-plan" + (placementCanPan ? " can-pan" : "")}
+                        onWheel=${onPlacementWheel}
+                        onPointerDownCapture=${onPlacementPointerDown}
+                        onPointerMoveCapture=${onPlacementPointerMove}
+                        onPointerUpCapture=${onPlacementPointerEnd}
+                        onPointerCancelCapture=${onPlacementPointerEnd}>
+                        <svg class="art-placement-svg" style=${placementSvgStyle} viewBox=${viewBox} preserveAspectRatio="xMidYMid meet" aria-label="Choose placement wall">
+                          <image href=${planImageUrl} x="0" y="0" width=${selectedFloorplan.width_px} height=${selectedFloorplan.height_px} preserveAspectRatio="none" />
+                          ${roomsForPlan.map((room) => html`
+                            <g key=${room.id} class=${selectedRoomId && selectedRoomId !== room.id ? "is-muted" : ""}
+                              onMouseEnter=${() => setHoverRoomId(room.id)}
+                              onMouseLeave=${() => setHoverRoomId(null)}
+                              onClick=${() => chooseRoom(room)}>
+                              <rect class=${"room-rect art-placement-room" + (hoverRoomId === room.id || selectedRoomId === room.id ? " is-hover" : "")}
+                                x=${room.rect_x} y=${room.rect_y} width=${room.rect_w} height=${room.rect_h} />
+                              ${!selectedRoom && html`<${FloorplanLabel}
+                                text=${room.name}
+                                fontSize=${Math.max(10, selectedFloorplan.width_px * 0.013)}
+                                x=${room.rect_x + selectedFloorplan.width_px * 0.006}
+                                y=${room.rect_y + selectedFloorplan.width_px * 0.02}
+                              />`}
+                            </g>
+                          `)}
+                          ${selectedRoom && walls.map((wall) => html`
+                            <g key=${wall.id} class="art-placement-wall-group"
+                              onMouseEnter=${() => setHoverWallId(wall.id)}
+                              onMouseLeave=${() => setHoverWallId(null)}
+                              onClick=${() => chooseWall(selectedRoom, wall)}>
+                              <line class=${"wall-line" + (hoverWallId === wall.id ? " is-hover" : "")}
+                                x1=${wall.ax} y1=${wall.ay} x2=${wall.bx} y2=${wall.by} stroke-width=${wallStroke} />
+                              <text class="wall-label" font-size=${Math.max(8, selectedRoom.rect_w * 0.025)}
+                                x=${(wall.ax + wall.bx) / 2} y=${(wall.ay + wall.by) / 2 - wallStroke}>${wall.name.toUpperCase()}</text>
+                            </g>
+                          `)}
+                        </svg>
+                        ${rooms === null && html`<p class="spinner art-placement-loading">Loading rooms...</p>`}
+                        ${rooms !== null && roomsForPlan.length === 0 && html`<p class="spinner art-placement-loading">No rooms on this floor plan.</p>`}
+                      </div>
                     </div>
-                  </div>
-                  <div ref=${placementPlanRef}
-                    class=${"art-placement-plan" + (placementCanPan ? " can-pan" : "")}
-                    onWheel=${onPlacementWheel}
-                    onPointerDownCapture=${onPlacementPointerDown}
-                    onPointerMoveCapture=${onPlacementPointerMove}
-                    onPointerUpCapture=${onPlacementPointerEnd}
-                    onPointerCancelCapture=${onPlacementPointerEnd}>
-                    <svg class="art-placement-svg" style=${placementSvgStyle} viewBox=${viewBox} preserveAspectRatio="xMidYMid meet" aria-label="Choose placement wall">
-                      <image href=${`/api/projects/${projectId}/plan-image?v=${floorplan.id}`} x="0" y="0" width=${floorplan.width_px} height=${floorplan.height_px} preserveAspectRatio="none" />
-                      ${(rooms || []).map((room) => html`
-                        <g key=${room.id} class=${selectedRoomId && selectedRoomId !== room.id ? "is-muted" : ""}
-                          onMouseEnter=${() => setHoverRoomId(room.id)}
-                          onMouseLeave=${() => setHoverRoomId(null)}
-                          onClick=${() => chooseRoom(room)}>
-                          <rect class=${"room-rect art-placement-room" + (hoverRoomId === room.id || selectedRoomId === room.id ? " is-hover" : "")}
-                            x=${room.rect_x} y=${room.rect_y} width=${room.rect_w} height=${room.rect_h} />
-                          ${!selectedRoom && html`<${FloorplanLabel} text=${room.name} fontSize=${Math.max(10, floorplan.width_px * 0.013)} x=${room.rect_x + floorplan.width_px * 0.006} y=${room.rect_y + floorplan.width_px * 0.02} />`}
-                        </g>
-                      `)}
-                      ${selectedRoom && walls.map((wall) => html`
-                        <g key=${wall.id} class="art-placement-wall-group"
-                          onMouseEnter=${() => setHoverWallId(wall.id)}
-                          onMouseLeave=${() => setHoverWallId(null)}
-                          onClick=${() => chooseWall(selectedRoom, wall)}>
-                          <line class=${"wall-line" + (hoverWallId === wall.id ? " is-hover" : "")}
-                            x1=${wall.ax} y1=${wall.ay} x2=${wall.bx} y2=${wall.by} stroke-width=${wallStroke} />
-                          <text class="wall-label" font-size=${Math.max(8, selectedRoom.rect_w * 0.025)}
-                            x=${(wall.ax + wall.bx) / 2} y=${(wall.ay + wall.by) / 2 - wallStroke}>${wall.name.toUpperCase()}</text>
-                        </g>
-                      `)}
-                    </svg>
-                    ${rooms === null && html`<p class="spinner art-placement-loading">Loading rooms...</p>`}
                   </div>
                   <div class="modal-actions">
                     ${selectedRoom
