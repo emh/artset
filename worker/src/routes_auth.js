@@ -2,47 +2,27 @@ import { json, error, readJson, randomId, nowMs } from "./json.js";
 import { hashPassword, verifyPassword, createSession, destroySession, sessionCookie, clearCookie } from "./auth.js";
 
 const id = (prefix) => `${prefix}_${randomId(12)}`;
-const normUsername = (u) => String(u || "").trim().toLowerCase();
-const USERNAME_RE = /^[a-z0-9][a-z0-9._-]{1,31}$/;
-
-function studioKey(value) {
-  return String(value || "")
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-}
 
 function loginParts(body) {
-  const raw = String(body.login || "").trim();
-  if (raw.includes("/")) {
-    const [studio, ...rest] = raw.split("/");
-    return { loginKey: studioKey(studio), username: normUsername(rest.join("/")) };
-  }
-  return {
-    loginKey: studioKey(body.studioKey || body.studioName),
-    username: normUsername(body.username),
-  };
+  const studioName = String(body.login || body.studioName || "");
+  return { loginKey: studioName, username: studioName };
 }
 
 function userJson(user) {
   return { id: user.id, username: user.username, name: user.name };
 }
 
-// POST /api/auth/signup  { studioName, name, username, password }
+// POST /api/auth/signup  { studioName, password }
 export async function signup({ env, request, url }) {
   const body = await readJson(request);
   if (!body) return error(400, "Invalid request");
-  const studioName = String(body.studioName || "").trim();
-  const loginKey = studioKey(body.studioKey || studioName);
-  const name = String(body.name || "").trim();
-  const username = normUsername(body.username);
+  const studioName = String(body.studioName || "");
+  const loginKey = studioName;
+  const name = studioName;
+  const username = studioName;
   const password = String(body.password || "");
 
-  if (!studioName) return error(400, "Studio name is required");
-  if (!loginKey) return error(400, "Studio login is required");
-  if (!name) return error(400, "Your name is required");
-  if (!USERNAME_RE.test(username)) return error(400, "Username must be 2-32 letters, numbers, dots, dashes, or underscores");
+  if (!studioName.trim()) return error(400, "Studio name is required");
   if (password.length < 8) return error(400, "Password must be at least 8 characters");
 
   const existingStudio = await env.DB.prepare("SELECT id FROM studios WHERE login_key = ?").bind(loginKey).first();
@@ -66,14 +46,14 @@ export async function signup({ env, request, url }) {
   );
 }
 
-// POST /api/auth/login  { login, password } where login is "studio/username"
+// POST /api/auth/login  { login, password } where login is a studio name/key
 export async function login({ env, request, url }) {
   const body = await readJson(request);
   if (!body) return error(400, "Invalid request");
   const { loginKey, username } = loginParts(body);
   const password = String(body.password || "");
 
-  if (!loginKey || !username) return error(400, "Studio and username are required");
+  if (!loginKey || !username) return error(400, "Studio is required");
 
   const user = await env.DB.prepare(
     `SELECT u.id, u.studio_id, u.username, u.name, u.password_hash,
@@ -84,7 +64,7 @@ export async function login({ env, request, url }) {
   ).bind(loginKey, username).first();
 
   const ok = user && (await verifyPassword(password, user.password_hash));
-  if (!ok) return error(401, "Incorrect studio, username, or password");
+  if (!ok) return error(401, "Incorrect studio or password");
 
   const sid = await createSession(env, user);
   return json(

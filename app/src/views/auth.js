@@ -7,7 +7,7 @@ export function AuthView() {
   const [mode, setMode] = useState("login"); // 'login' | 'signup'
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
-  const [f, setF] = useState({ studioName: "", name: "", username: "", loginId: "", password: "" });
+  const [f, setF] = useState({ studioName: "", loginId: "", password: "" });
 
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
 
@@ -31,11 +31,11 @@ export function AuthView() {
   return html`
     <div class="center-pane">
       <div class="auth">
-        <div class="eyebrow" style="margin-bottom:10px">Artset</div>
+        <div class="auth-brand brand-block">
+          <span class="brandline"><span class="brand">Artset</span><span class="credit-by">by</span></span>
+          <span class="studio-logo"><span>Gaile</span><span>Guevara</span><span>Studio</span></span>
+        </div>
         <h1 class="display">${isSignup ? "Create your studio" : "Sign in"}</h1>
-        <p class="muted" style="margin-top:6px;margin-bottom:28px">
-          ${isSignup ? "Start a studio workspace." : "Welcome back."}
-        </p>
 
         <form onSubmit=${submit}>
           ${isSignup && html`
@@ -43,21 +43,13 @@ export function AuthView() {
               <span class="label">Studio name</span>
               <input class="input" name="organization" autocomplete="organization" value=${f.studioName} onInput=${set("studioName")} placeholder="Gaile Guevara Studio" />
             </label>
-            <label class="field">
-              <span class="label">Your name</span>
-              <input class="input" name="name" autocomplete="name" value=${f.name} onInput=${set("name")} placeholder="Full name" />
-            </label>
           `}
           ${!isSignup && html`
             <label class="field">
-              <span class="label">Studio / username</span>
-              <input class="input" name="username" autocomplete="username" value=${f.loginId} onInput=${set("loginId")} placeholder="gaile-guevara-studio/evan" />
+              <span class="label">Studio</span>
+              <input class="input" name="organization" autocomplete="organization" value=${f.loginId} onInput=${set("loginId")} placeholder="Gaile Guevara Studio" />
             </label>
           `}
-          ${isSignup && html`<label class="field">
-            <span class="label">Username</span>
-            <input class="input" name="username" autocomplete="username" value=${f.username} onInput=${set("username")} placeholder="evan" />
-          </label>`}
           <label class="field">
             <span class="label">Password</span>
             <input class="input" type="password" name="password" autocomplete=${isSignup ? "new-password" : "current-password"} value=${f.password} onInput=${set("password")} placeholder=${isSignup ? "At least 8 characters" : "Password"} />

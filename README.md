@@ -186,6 +186,8 @@ sign in again); the local D1 data persists on disk.
 | `npm run dev` | `wrangler dev` (local simulators) |
 | `npm run migrate:local` | apply migrations to the local DB |
 | `npm run migrate:remote` | apply migrations to the production DB |
+| `npm run prod:studios:list` | list production studios with user/project/art counts |
+| `npm run prod:studios:delete -- "Exact Studio Name"` | delete one production studio, including users, projects, art, floor plans, and uploaded images |
 | `npm run deploy` | `wrangler deploy` to production |
 
 ---
