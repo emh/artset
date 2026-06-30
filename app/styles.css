@@ -312,8 +312,9 @@ main { padding: 56px 0 120px; }
   cursor: pointer;
 }
 .review-tree-group > .review-tree-node { padding-left: 14px; }
-.review-tree-branch > .review-tree-node { padding-left: 28px; }
-.review-tree-branch > .review-tree-node + .review-tree-node { padding-left: 44px; }
+.review-tree-branch--rooms > .review-tree-node { padding-left: 28px; }
+.review-tree-branch--walls > .review-tree-node { padding-left: 44px; }
+.review-tree-branch--walls > .review-tree-node + .review-tree-node { padding-left: 60px; }
 .review-tree-node:hover,
 .review-tree-node.is-active { background: var(--paper-2); }
 .review-tree-name {
@@ -334,6 +335,33 @@ main { padding: 56px 0 120px; }
   text-transform: none;
 }
 .review-main { min-width: 0; }
+.review-floorplan-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 18px;
+}
+.review-floorplan-card {
+  display: grid;
+  gap: 9px;
+  align-content: start;
+  padding: 0 0 14px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+.review-floorplan-card:hover { background: var(--paper-2); }
+.review-floorplan-card img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: contain;
+  background: var(--paper-2);
+  border-bottom: 1px solid var(--line);
+}
+.review-floorplan-card .review-tree-name,
+.review-floorplan-card .review-tree-meta { padding: 0 14px; }
 .review-panel-head {
   display: flex;
   justify-content: space-between;

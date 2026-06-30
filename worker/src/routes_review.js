@@ -11,8 +11,10 @@ const PLACEMENT_COLS = `pl.id, pl.art_piece_id, pl.art_size_id, pl.wall_id, pl.s
 // Assemble the full read-only project tree (used by both authed review and public share).
 export async function buildReview(env, project) {
   const studio = await env.DB.prepare("SELECT name FROM studios WHERE id = ?").bind(project.studio_id).first();
-  const floorplan = await env.DB.prepare("SELECT image_key, width_px, height_px FROM floorplans WHERE project_id = ?")
-    .bind(project.id).first();
+  const floorplans = (await env.DB.prepare(
+    "SELECT id, name, image_key, width_px, height_px FROM floorplans WHERE project_id = ? ORDER BY rowid"
+  ).bind(project.id).all()).results;
+  const floorplan = floorplans[0] || null;
   const rooms = (await env.DB.prepare("SELECT * FROM rooms WHERE project_id = ? ORDER BY sort").bind(project.id).all()).results;
   const walls = (await env.DB.prepare(
     "SELECT w.* FROM walls w JOIN rooms r ON r.id = w.room_id WHERE r.project_id = ? ORDER BY w.sort"
@@ -56,7 +58,7 @@ export async function buildReview(env, project) {
   }
 
   const roomTree = rooms.map((r) => ({
-    id: r.id, name: r.name, rect_x: r.rect_x, rect_y: r.rect_y, rect_w: r.rect_w, rect_h: r.rect_h,
+    id: r.id, floorplan_id: r.floorplan_id, name: r.name, rect_x: r.rect_x, rect_y: r.rect_y, rect_w: r.rect_w, rect_h: r.rect_h,
     walls: wallsByRoom.get(r.id) || [],
   }));
   const art = pieces.map((a) => ({
@@ -77,7 +79,14 @@ export async function buildReview(env, project) {
   return {
     project: { id: project.id, name: project.name },
     studio: { name: studio ? studio.name : "" },
-    floorplan: floorplan ? { width_px: floorplan.width_px, height_px: floorplan.height_px, v: floorplan.image_key } : null,
+    floorplan: floorplan ? {
+      id: floorplan.id, name: floorplan.name, width_px: floorplan.width_px, height_px: floorplan.height_px,
+      image_key: floorplan.image_key, v: floorplan.image_key,
+    } : null,
+    floorplans: floorplans.map((fp) => ({
+      id: fp.id, name: fp.name, width_px: fp.width_px, height_px: fp.height_px,
+      image_key: fp.image_key, v: fp.image_key,
+    })),
     rooms: roomTree, art, summary,
   };
 }
@@ -131,7 +140,19 @@ export async function getPublicReview({ env, params }) {
 export async function getPublicPlanImage({ env, params }) {
   const project = await projectForToken(env, params.token);
   if (!project) return error(404, "Not found");
-  const fp = await env.DB.prepare("SELECT image_key FROM floorplans WHERE project_id = ?").bind(project.id).first();
+  const fp = await env.DB.prepare("SELECT image_key FROM floorplans WHERE project_id = ? ORDER BY rowid").bind(project.id).first();
+  if (!fp) return error(404, "No floor plan");
+  const obj = await env.BUCKET.get(fp.image_key);
+  if (!obj) return error(404, "Image missing");
+  return new Response(obj.body, { headers: { "content-type": (obj.httpMetadata && obj.httpMetadata.contentType) || "application/octet-stream", "cache-control": "public, max-age=3600" } });
+}
+
+// GET /api/public/:token/floorplans/:floorplanId/image
+export async function getPublicFloorplanImage({ env, params }) {
+  const project = await projectForToken(env, params.token);
+  if (!project) return error(404, "Not found");
+  const fp = await env.DB.prepare("SELECT image_key FROM floorplans WHERE id = ? AND project_id = ?")
+    .bind(params.floorplanId, project.id).first();
   if (!fp) return error(404, "No floor plan");
   const obj = await env.BUCKET.get(fp.image_key);
   if (!obj) return error(404, "Image missing");

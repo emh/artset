@@ -22,7 +22,7 @@ import {
   listPlacements, createPlacement, updatePlacement, deletePlacement,
 } from "./routes_placements.js";
 import {
-  getReview, createShare, deleteShare, getPublicReview, getPublicPlanImage, getPublicArtImage,
+  getReview, createShare, deleteShare, getPublicReview, getPublicPlanImage, getPublicFloorplanImage, getPublicArtImage,
 } from "./routes_review.js";
 
 // Wrap a handler so it requires an authenticated session.
@@ -102,6 +102,7 @@ router.delete("/api/projects/:id/share", auth(deleteShare));
 // public (no auth) via share token
 router.get("/api/public/:token", getPublicReview);
 router.get("/api/public/:token/plan-image", getPublicPlanImage);
+router.get("/api/public/:token/floorplans/:floorplanId/image", getPublicFloorplanImage);
 router.get("/api/public/:token/art/:artId/image", getPublicArtImage);
 
 export default {

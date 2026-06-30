@@ -18,14 +18,26 @@ function roomPlacementCount(room) {
   return (room.walls || []).reduce((sum, wall) => sum + (wall.placements || []).length, 0);
 }
 
-function findSelection(rooms, selection) {
+function roomsForFloorplan(rooms, floorplan) {
+  if (!floorplan) return [];
+  return (rooms || []).filter((room) => room.floorplan_id === floorplan.id);
+}
+
+function floorplanPlacementCount(rooms, floorplan) {
+  return roomsForFloorplan(rooms, floorplan).reduce((sum, room) => sum + roomPlacementCount(room), 0);
+}
+
+function findSelection(floorplans, rooms, selection) {
   if (!selection || selection.type === "project") return { type: "project" };
-  for (const room of rooms) {
-    if (selection.type === "room" && room.id === selection.id) return { type: "room", room };
-    for (const wall of room.walls || []) {
-      if (selection.type === "wall" && wall.id === selection.id) return { type: "wall", room, wall };
-      for (const placement of wall.placements || []) {
-        if (selection.type === "placement" && placement.id === selection.id) return { type: "placement", room, wall, placement };
+  for (const floorplan of floorplans) {
+    if (selection.type === "floorplan" && floorplan.id === selection.id) return { type: "floorplan", floorplan };
+    for (const room of roomsForFloorplan(rooms, floorplan)) {
+      if (selection.type === "room" && room.id === selection.id) return { type: "room", floorplan, room };
+      for (const wall of room.walls || []) {
+        if (selection.type === "wall" && wall.id === selection.id) return { type: "wall", floorplan, room, wall };
+        for (const placement of wall.placements || []) {
+          if (selection.type === "placement" && placement.id === selection.id) return { type: "placement", floorplan, room, wall, placement };
+        }
       }
     }
   }
@@ -52,9 +64,15 @@ export function ReviewView({ projectId, token }) {
   if (!data) return html`<main><div class="wrap"><p class="spinner">Loading...</p></div></main>`;
 
   const { project, studio, floorplan, rooms, summary } = data;
-  const selected = findSelection(rooms, selection);
-  const fpV = floorplan && floorplan.v;
-  const planImageUrl = (isPublic ? `/api/public/${token}/plan-image` : `/api/projects/${projectId}/plan-image`) + (fpV ? `?v=${encodeURIComponent(fpV)}` : "");
+  const floorplans = data.floorplans || (floorplan ? [floorplan] : []);
+  const selected = findSelection(floorplans, rooms, selection);
+  const planImageUrl = (fp) => {
+    const v = fp && (fp.image_key || fp.v);
+    const base = isPublic
+      ? (fp && fp.id ? `/api/public/${token}/floorplans/${fp.id}/image` : `/api/public/${token}/plan-image`)
+      : (fp && fp.id ? `/api/projects/${projectId}/floorplans/${fp.id}/image` : `/api/projects/${projectId}/plan-image`);
+    return base + (v ? `?v=${encodeURIComponent(v)}` : "");
+  };
   const artImageUrl = (aid, v) => (isPublic ? `/api/public/${token}/art/${aid}/image` : `/api/art/${aid}/image`) + (v ? `?v=${encodeURIComponent(v)}` : "");
 
   function select(next) { setSelection(next); setHoverKey(null); }
@@ -71,26 +89,35 @@ export function ReviewView({ projectId, token }) {
           <span class="review-tree-meta">${summary.placed} placed</span>
         </button>
         <div class="review-tree-list">
-          ${rooms.map((room) => {
-            const count = roomPlacementCount(room);
+          ${floorplans.map((fp, index) => {
+            const fpRooms = roomsForFloorplan(rooms, fp);
+            const count = floorplanPlacementCount(rooms, fp);
             return html`
-              <div class="review-tree-group" key=${room.id}>
-                <button class=${nodeClass("room", room.id)} type="button" onClick=${() => select({ type: "room", id: room.id })}>
-                  <span class="review-tree-name">${room.name}</span>
+              <div class="review-tree-group" key=${fp.id}>
+                <button class=${nodeClass("floorplan", fp.id)} type="button" onClick=${() => select({ type: "floorplan", id: fp.id })}>
+                  <span class="review-tree-name">${fp.name || `Floor plan ${index + 1}`}</span>
                   <span class="review-tree-meta">${count} placed</span>
                 </button>
-                ${(room.walls || []).map((wall) => html`
-                  <div class="review-tree-branch" key=${wall.id}>
-                    <button class=${nodeClass("wall", wall.id)} type="button" onClick=${() => select({ type: "wall", id: wall.id })}>
-                      <span class="review-tree-name">${wall.name}</span>
-                      <span class="review-tree-meta">${(wall.placements || []).length}</span>
+                <div class="review-tree-branch review-tree-branch--rooms">
+                  ${fpRooms.map((room) => html`
+                    <button class=${nodeClass("room", room.id)} key=${room.id} type="button" onClick=${() => select({ type: "room", id: room.id })}>
+                      <span class="review-tree-name">${room.name}</span>
+                      <span class="review-tree-meta">${roomPlacementCount(room)} placed</span>
                     </button>
-                    ${(wall.placements || []).map((p) => html`
-                      <button class=${nodeClass("placement", p.id)} key=${p.id} type="button" onClick=${() => select({ type: "placement", id: p.id })}>
-                        <span class="review-tree-name">${p.title}</span>
-                        <span class="review-tree-meta">${sizeText(p)}</span>
-                      </button>`)}
-                  </div>`)}
+                    ${(room.walls || []).map((wall) => html`
+                      <div class="review-tree-branch review-tree-branch--walls" key=${wall.id}>
+                        <button class=${nodeClass("wall", wall.id)} type="button" onClick=${() => select({ type: "wall", id: wall.id })}>
+                          <span class="review-tree-name">${wall.name}</span>
+                          <span class="review-tree-meta">${(wall.placements || []).length}</span>
+                        </button>
+                        ${(wall.placements || []).map((p) => html`
+                          <button class=${nodeClass("placement", p.id)} key=${p.id} type="button" onClick=${() => select({ type: "placement", id: p.id })}>
+                            <span class="review-tree-name">${p.title}</span>
+                            <span class="review-tree-meta">${sizeText(p)}</span>
+                          </button>`)}
+                      </div>`)}
+                  `)}
+                </div>
               </div>`;
           })}
         </div>
@@ -98,9 +125,7 @@ export function ReviewView({ projectId, token }) {
   }
 
   function projectPanel() {
-    if (!floorplan) return html`<div class="empty"><p>No floor plan uploaded.</p></div>`;
-    const W = floorplan.width_px, H = floorplan.height_px;
-    const labelSize = 10;
+    if (!floorplans.length) return html`<div class="empty"><p>No floor plan uploaded.</p></div>`;
     return html`
       <section class="review-panel">
         <div class="review-panel-head">
@@ -109,20 +134,47 @@ export function ReviewView({ projectId, token }) {
             <h1>${project.name}</h1>
           </div>
         </div>
+        <div class="review-floorplan-grid">
+          ${floorplans.map((fp, index) => {
+            const fpRooms = roomsForFloorplan(rooms, fp);
+            return html`
+              <button class="review-floorplan-card" key=${fp.id} type="button" onClick=${() => select({ type: "floorplan", id: fp.id })}>
+                <img src=${planImageUrl(fp)} alt="" />
+                <span class="review-tree-name">${fp.name || `Floor plan ${index + 1}`}</span>
+                <span class="review-tree-meta">${fpRooms.length} rooms · ${floorplanPlacementCount(rooms, fp)} placed</span>
+              </button>`;
+          })}
+        </div>
+      </section>`;
+  }
+
+  function floorplanPanel(floorplan) {
+    if (!floorplan) return html`<div class="empty"><p>No floor plan uploaded.</p></div>`;
+    const fpRooms = roomsForFloorplan(rooms, floorplan);
+    const W = floorplan.width_px, H = floorplan.height_px;
+    const labelSize = 10;
+    return html`
+      <section class="review-panel">
+        <div class="review-panel-head">
+          <div>
+            <div class="eyebrow">Floor plan</div>
+            <h1>${floorplan.name || project.name}</h1>
+          </div>
+        </div>
         <${FloorplanViewport}
           width=${W}
           height=${H}
           viewBox=${{ x: 0, y: 0, w: W, h: H }}
-          imageHref=${planImageUrl}
+          imageHref=${planImageUrl(floorplan)}
           ariaLabel="Project rooms"
-          title=${project.name}
+          title=${floorplan.name || project.name}
           renderMiniContent=${() => html`
-            ${rooms.map((room) => html`
+            ${fpRooms.map((room) => html`
               <rect class="room-rect" x=${room.rect_x} y=${room.rect_y} width=${room.rect_w} height=${room.rect_h} />
             `)}
           `}>
           ${({ displayScale }) => html`
-            ${rooms.map((room) => {
+            ${fpRooms.map((room) => {
               const key = `room:${room.id}`;
               return html`
                 <g key=${room.id} class="review-click-target"
@@ -145,7 +197,7 @@ export function ReviewView({ projectId, token }) {
       </section>`;
   }
 
-  function roomPanel(room) {
+  function roomPanel(room, floorplan) {
     if (!floorplan) return null;
     const pad = 0.08 * Math.max(room.rect_w, room.rect_h);
     const vb = { x: room.rect_x - pad, y: room.rect_y - pad, w: room.rect_w + 2 * pad, h: room.rect_h + 2 * pad };
@@ -163,7 +215,7 @@ export function ReviewView({ projectId, token }) {
           width=${floorplan.width_px}
           height=${floorplan.height_px}
           viewBox=${vb}
-          imageHref=${planImageUrl}
+          imageHref=${planImageUrl(floorplan)}
           ariaLabel=${`${room.name} walls`}
           title=${room.name}
           renderMiniContent=${() => html`
@@ -269,7 +321,8 @@ export function ReviewView({ projectId, token }) {
   }
 
   function mainPanel() {
-    if (selected.type === "room") return roomPanel(selected.room);
+    if (selected.type === "floorplan") return floorplanPanel(selected.floorplan);
+    if (selected.type === "room") return roomPanel(selected.room, selected.floorplan);
     if (selected.type === "wall") return wallPanel(selected.room, selected.wall);
     if (selected.type === "placement") return placementPanel(selected.room, selected.wall, selected.placement);
     return projectPanel();
